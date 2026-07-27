@@ -1568,19 +1568,54 @@ const adminsCol = db.collection('admins');
    GANTI nilai VAPID_KEY di bawah dengan "Web Push certificate key
    pair" dari Firebase Console → Project Settings → Cloud Messaging
    → Web configuration → Generate key pair.
-   Fitur ini feature-detected (firebase.messaging.isSupported()) karena
-   tidak semua browser/konteks mendukung push notification (mis. Safari
-   versi lama, atau saat situs dibuka bukan lewat HTTPS) — kalau tidak
-   didukung, `messaging` akan tetap null dan fitur ini otomatis nonaktif
-   tanpa bikin error di bagian lain aplikasi.
+
+   PENTING (pelajaran dari bug sebelumnya): firebase.messaging.isSupported()
+   TIDAK selalu mengembalikan Promise di semua versi/konteks SDK — kadang
+   ia langsung mengembalikan boolean. Kalau kode asal panggil `.then()`
+   pada nilai yang ternyata bukan Promise, itu akan throw TypeError
+   SINKRON yang menghentikan SELURUH sisa <script> di halaman ini
+   (termasuk tombol Login landing page, dst) — persis bug yang bikin
+   seluruh situs macet total kemarin. Makanya seluruh blok ini dibungkus
+   try/catch dan mengecek dulu apakah hasilnya benar-benar thenable
+   sebelum memanggil .then(), supaya SEAPAPUN yang terjadi di sini,
+   tidak akan pernah menjatuhkan bagian lain aplikasi.
 ========================================================= */
-const VAPID_KEY = 'BEwsBIBjJlNiLr-Ezni4jP-7FaQhj1poRYxq7jWDVtzeZTflOkLf6RtAa9suWRlQZyRKFQb3UsgXC8ef1Ui8GME';
+const VAPID_KEY = 'GANTI_DENGAN_VAPID_KEY_DARI_FIREBASE_CONSOLE';
 let messaging = null;
-if(firebase.messaging && firebase.messaging.isSupported){
-  firebase.messaging.isSupported().then(supported=>{
-    if(supported) messaging = firebase.messaging();
-  }).catch(()=>{ messaging = null; });
+
+function initMessagingIfSupported(onReady){
+  try{
+    if(!firebase.messaging || typeof firebase.messaging.isSupported !== 'function') return;
+    const result = firebase.messaging.isSupported();
+    const applySupport = (supported)=>{
+      try{
+        if(!supported) return;
+        messaging = firebase.messaging();
+        if(onReady) onReady(messaging);
+      } catch(e){ console.error('Gagal inisialisasi Firebase Messaging:', e); }
+    };
+    if(result && typeof result.then === 'function'){
+      result.then(applySupport).catch(e=> console.error('Cek dukungan messaging gagal:', e));
+    } else {
+      applySupport(result);
+    }
+  } catch(e){
+    // Sengaja ditelan di sini — fitur notifikasi opsional, TIDAK BOLEH
+    // mengganggu load aplikasi utama sedikit pun kalau ada masalah.
+    console.error('Firebase Messaging tidak tersedia di browser ini:', e);
+  }
 }
+
+initMessagingIfSupported((m)=>{
+  // Kalau tab Jagarute sedang terbuka saat notifikasi datang, tampilkan
+  // sebagai toast in-app (browser tidak akan munculkan notifikasi native
+  // terpisah saat halaman lagi aktif dilihat).
+  try{
+    m.onMessage(payload=>{
+      showToast(payload?.notification?.body || 'Status laporan kamu diperbarui.');
+    });
+  } catch(e){ console.error('Gagal pasang listener onMessage:', e); }
+});
 
 // Minta izin notifikasi & ambil token FCM. Dipanggil saat warga mengirim
 // laporan (bukan langsung saat buka situs) — supaya permintaan izin
@@ -1597,18 +1632,6 @@ async function getNotifToken(){
     console.error('Gagal mengaktifkan notifikasi (tidak fatal, laporan tetap terkirim):', e);
     return null;
   }
-}
-
-// Kalau tab Jagarute sedang terbuka saat notifikasi datang, tampilkan
-// sebagai toast in-app (browser tidak akan munculkan notifikasi native
-// terpisah saat halaman lagi aktif dilihat).
-if(firebase.messaging && firebase.messaging.isSupported){
-  firebase.messaging.isSupported().then(supported=>{
-    if(!supported) return;
-    firebase.messaging().onMessage(payload=>{
-      showToast(payload?.notification?.body || 'Status laporan kamu diperbarui.');
-    });
-  });
 }
 
 /* =========================================================
