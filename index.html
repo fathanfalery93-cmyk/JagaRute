@@ -1201,6 +1201,9 @@ input,select{ font-family:inherit; }
       </div>
       <button id="wargaThemeToggle" class="icon-btn" aria-label="Ganti tema terang/gelap" data-icon="moon"></button>
       <button id="basemapToggle" class="icon-btn"><span data-icon="layers"></span> <span class="btn-label">Satelit</span></button>
+      <button id="checkTicketBtn" class="icon-btn"><span data-icon="search"></span> <span class="btn-label">Cek Status</span></button>
+      <button id="myReportsBtn" class="icon-btn"><span data-icon="clipboard"></span> <span class="btn-label">Laporan Saya</span></button>
+      <button id="aboutBtn" class="icon-btn" aria-label="Tentang Jagarute"><span data-icon="fileText"></span> <span class="btn-label">Tentang</span></button>
       <button id="adminModeBtn" class="icon-btn"><span data-icon="wrench"></span> <span class="btn-label">Mode Admin</span></button>
     </div>
   </header>
@@ -1462,6 +1465,41 @@ input,select{ font-family:inherit; }
   </div>
 </div>
 
+<div id="ticketModal" class="modal" hidden>
+  <div class="modal-box">
+    <button id="closeTicketModal" class="modal-close" aria-label="Tutup">✕</button>
+    <h3>Cek Status Laporan</h3>
+    <p class="hint" style="margin-bottom:1rem;">Masukkan ID Tiket yang kamu dapat saat mengirim laporan (contoh: JLN-A1B2).</p>
+    <label for="ticketInput" style="display:block;font-weight:700;font-size:.85rem;margin-bottom:.4rem;">ID Tiket</label>
+    <input id="ticketInput" type="text" placeholder="JLN-XXXX" style="width:100%;min-height:46px;border:2px solid var(--concrete-dark);border-radius:var(--radius-sm);padding:0 .8rem;font-size:1rem;background:var(--surface);color:var(--ink);text-transform:uppercase;">
+    <div id="ticketResult" style="margin-top:1rem;"></div>
+    <button id="ticketSearchBtn" class="btn-submit" style="border-radius:var(--radius-sm);margin-top:1rem;">Cari</button>
+  </div>
+</div>
+
+<div id="aboutModal" class="modal" hidden>
+  <div class="modal-box" style="max-width:520px;text-align:left;">
+    <button id="closeAboutModal" class="modal-close" aria-label="Tutup">✕</button>
+    <h3>Tentang Jagarute</h3>
+    <div class="hint" style="margin-bottom:1rem;line-height:1.6;">
+      <p><strong>Jagarute</strong> adalah platform pemantauan &amp; pelaporan kerusakan jalan berbasis peta, dibuat supaya warga bisa melapor langsung dan memantau progres penanganan secara transparan.</p>
+      <p><strong>Bagaimana laporan diproses?</strong> Setiap laporan baru diperiksa dulu oleh admin sebelum tayang ke publik (mencegah spam/laporan tidak jelas), lalu berpindah status: Belum Ditangani → Dalam Tinjauan → Dalam Proses → Selesai.</p>
+      <p><strong>Privasi data kamu:</strong> Nama, email, dan nomor HP yang kamu isi saat melapor hanya digunakan oleh admin untuk keperluan verifikasi &amp; tindak lanjut laporan — tidak ditampilkan ke publik lain dan tidak dipakai untuk keperluan promosi/pemasaran.</p>
+      <p><strong>Foto bukti</strong> yang kamu unggah tersimpan di layanan cloud (Firebase Storage) dan dapat dilihat publik sebagai bagian dari transparansi laporan (sama seperti data laporan lainnya).</p>
+    </div>
+    <button id="closeAboutModalBtn" class="btn-submit" style="border-radius:var(--radius-sm);">Mengerti</button>
+  </div>
+</div>
+
+<div id="myReportsModal" class="modal" hidden>
+  <div class="modal-box" style="max-width:480px;text-align:left;">
+    <button id="closeMyReportsModal" class="modal-close" aria-label="Tutup">✕</button>
+    <h3>Laporan Saya</h3>
+    <p class="hint" style="margin-bottom:1rem;">Daftar laporan yang pernah kamu kirim dari perangkat &amp; browser ini, lengkap dengan nomor tiketnya.</p>
+    <div id="myReportsBody"></div>
+  </div>
+</div>
+
 <button id="aiFab" class="ai-fab"><span data-icon="bot"></span> <span>Tanya AI</span></button>
 <div id="aiPanel" class="ai-panel" hidden>
   <div class="panel-top">
@@ -1489,6 +1527,8 @@ input,select{ font-family:inherit; }
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script>
@@ -1519,8 +1559,57 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const auth = firebase.auth();
+const storage = firebase.storage();
 const reportsCol = db.collection('laporan');
 const adminsCol = db.collection('admins');
+
+/* =========================================================
+   NOTIFIKASI PUSH (Firebase Cloud Messaging)
+   GANTI nilai VAPID_KEY di bawah dengan "Web Push certificate key
+   pair" dari Firebase Console → Project Settings → Cloud Messaging
+   → Web configuration → Generate key pair.
+   Fitur ini feature-detected (firebase.messaging.isSupported()) karena
+   tidak semua browser/konteks mendukung push notification (mis. Safari
+   versi lama, atau saat situs dibuka bukan lewat HTTPS) — kalau tidak
+   didukung, `messaging` akan tetap null dan fitur ini otomatis nonaktif
+   tanpa bikin error di bagian lain aplikasi.
+========================================================= */
+const VAPID_KEY = 'GANTI_DENGAN_VAPID_KEY_DARI_FIREBASE_CONSOLE';
+let messaging = null;
+if(firebase.messaging && firebase.messaging.isSupported){
+  firebase.messaging.isSupported().then(supported=>{
+    if(supported) messaging = firebase.messaging();
+  }).catch(()=>{ messaging = null; });
+}
+
+// Minta izin notifikasi & ambil token FCM. Dipanggil saat warga mengirim
+// laporan (bukan langsung saat buka situs) — supaya permintaan izin
+// browser muncul di momen yang masuk akal ("saya mau tahu progres
+// laporan saya"), bukan tiba-tiba saat baru buka halaman.
+async function getNotifToken(){
+  if(!messaging) return null;
+  try{
+    const permission = await Notification.requestPermission();
+    if(permission !== 'granted') return null;
+    const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+    return await messaging.getToken({ vapidKey: VAPID_KEY, serviceWorkerRegistration: registration });
+  } catch(e){
+    console.error('Gagal mengaktifkan notifikasi (tidak fatal, laporan tetap terkirim):', e);
+    return null;
+  }
+}
+
+// Kalau tab Jagarute sedang terbuka saat notifikasi datang, tampilkan
+// sebagai toast in-app (browser tidak akan munculkan notifikasi native
+// terpisah saat halaman lagi aktif dilihat).
+if(firebase.messaging && firebase.messaging.isSupported){
+  firebase.messaging.isSupported().then(supported=>{
+    if(!supported) return;
+    firebase.messaging().onMessage(payload=>{
+      showToast(payload?.notification?.body || 'Status laporan kamu diperbarui.');
+    });
+  });
+}
 
 /* =========================================================
    AUTENTIKASI (menggantikan "kode akses" hardcoded di client)
@@ -1575,6 +1664,12 @@ const LEVEL_META = {
 };
 
 let reports = [];
+// publicReports = subset `reports` yang sudah diverifikasi admin — ini
+// yang dipakai untuk SEMUA tampilan publik (peta, daftar terbaru,
+// statistik, saran pencarian, konteks Tanya AI). Dashboard admin tetap
+// pakai `reports` penuh supaya admin bisa melihat & memverifikasi yang
+// masih tertunda.
+let publicReports = [];
 
 function toDate(val){
   if(!val) return new Date();
@@ -1594,11 +1689,19 @@ function docToReport(doc){
     level: d.level,
     status: d.status,
     pelapor: d.pelapor || { nama:'-', email:'-', telp:'-' },
-    fotoDataUrl: d.fotoDataUrl || null,
+    // fotoUrl = link Firebase Storage (data baru). fotoDataUrl = base64
+    // lama yang masih ada di dokumen-dokumen sebelum migrasi ke Storage.
+    // Keduanya sama-sama valid dipakai langsung sebagai src gambar.
+    fotoDataUrl: d.fotoUrl || d.fotoDataUrl || null,
     createdAt,
     resolvedAt: d.resolvedAt ? toDate(d.resolvedAt) : null,
     tanggal: formatTanggal(createdAt),
     confirmCount: d.confirmCount || 0,
+    // Laporan baru (setelah fitur moderasi ini ada) mulai dari
+    // verified=false sampai admin mengecek & menayangkannya ke publik.
+    // Dokumen LAMA yang belum punya field ini dianggap sudah verified,
+    // supaya data yang sudah tayang sebelumnya tidak tiba-tiba hilang.
+    verified: d.verified !== false,
   };
 }
 
@@ -1608,6 +1711,7 @@ function docToReport(doc){
 function startRealtimeSync(){
   reportsCol.orderBy('createdAt', 'desc').onSnapshot(snapshot=>{
     reports = snapshot.docs.map(docToReport);
+    publicReports = reports.filter(r => r.verified);
     applyFilters();
     updateStats();
     if(isAdmin) refreshAdminDashboard();
@@ -1655,6 +1759,7 @@ async function seedDemoData(){
       fotoDataUrl: null,
       createdAt: firebase.firestore.Timestamp.fromDate(createdAt),
       confirmCount: Math.floor(Math.random()*6),
+      verified: true,
     });
   });
   await batch.commit();
@@ -1670,6 +1775,23 @@ function priorityScore(r){
 }
 function isUrgent(r){
   return r.status !== 'selesai' && r.level >= 3 && daysSince(r.createdAt) >= 3;
+}
+
+// Jarak antar 2 titik koordinat dalam meter (formula Haversine).
+// Dipakai untuk mendeteksi laporan yang kemungkinan duplikat —
+// supaya satu lubang yang sama tidak numpuk jadi banyak marker
+// terpisah hanya karena dilaporkan beberapa warga berbeda.
+function distanceMeters(lat1, lng1, lat2, lng2){
+  const R = 6371000;
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+const NEARBY_RADIUS_M = 40; // radius dianggap "laporan yang sama"
+function findNearbyReports(lat, lng){
+  return reports.filter(r => r.status !== 'selesai' && distanceMeters(lat, lng, r.lat, r.lng) <= NEARBY_RADIUS_M);
 }
 
 /* =========================================================
@@ -1953,6 +2075,7 @@ const ICONS = {
   power: '<path d="M12 3v9"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/>',
   download: '<path d="M12 3v12m0 0 4.5-4.5M12 15 7.5 10.5"/><path d="M4 19h16"/>',
   printer: '<rect x="6" y="9" width="12" height="7" rx="1"/><path d="M6 9V4h12v5"/><path d="M8 16v4h8v-4"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',
 };
 function icon(name, size){
   size = size || 18;
@@ -2132,7 +2255,7 @@ function renderSuggestions(query){
   const box = document.getElementById('searchSuggestions');
   if(!query){ hideSuggestions(); return; }
   const q = query.toLowerCase();
-  const matches = reports.filter(r=> r.namaJalan.toLowerCase().includes(q)).slice(0,6);
+  const matches = publicReports.filter(r=> r.namaJalan.toLowerCase().includes(q)).slice(0,6);
   if(matches.length === 0){ hideSuggestions(); return; }
   box.innerHTML = matches.map(r=>{
     const meta = STATUS_META[r.status];
@@ -2170,7 +2293,7 @@ function hideSuggestions(){
 }
 
 function selectSuggestion(id){
-  const r = reports.find(x=>x.id===id);
+  const r = publicReports.find(x=>x.id===id);
   if(!r) return;
   document.getElementById('searchInput').value = r.namaJalan;
   hideSuggestions();
@@ -2187,7 +2310,7 @@ function selectSuggestion(id){
 
 function applyFilters(){
   const q = document.getElementById('searchInput').value.trim().toLowerCase();
-  const filtered = reports.filter(r=>
+  const filtered = publicReports.filter(r=>
     (!q || r.namaJalan.toLowerCase().includes(q)) &&
     selectedLevels.has(r.level) &&
     selectedStatuses.has(r.status)
@@ -2200,8 +2323,8 @@ function applyFilters(){
 ========================================================= */
 function updateStats(){
   const counts = { belum:0, tinjauan:0, proses:0, selesai:0 };
-  reports.forEach(r=> counts[r.status]++ );
-  const total = reports.length || 1;
+  publicReports.forEach(r=> counts[r.status]++ );
+  const total = publicReports.length || 1;
 
   let acc = 0;
   const stops = STATUS_ORDER.map(st=>{
@@ -2210,7 +2333,7 @@ function updateStats(){
     return `${STATUS_META[st].hex} ${start}% ${acc}%`;
   }).join(', ');
   document.getElementById('statDonut').style.background = `conic-gradient(${stops})`;
-  document.getElementById('statTotal').textContent = reports.length;
+  document.getElementById('statTotal').textContent = publicReports.length;
 
   const list = document.getElementById('statList');
   list.innerHTML = STATUS_ORDER.map(st=>`
@@ -2222,10 +2345,10 @@ function updateStats(){
 }
 
 function updateHeaderStats(counts){
-  const urgentCount = reports.filter(isUrgent).length;
-  const total = reports.length || 1;
+  const urgentCount = publicReports.filter(isUrgent).length;
+  const total = publicReports.length || 1;
   const cards = [
-    { label:'Total Laporan', value: reports.length, pct:100, icon:'clipboard', bg:'#3A3D44', urgent:false },
+    { label:'Total Laporan', value: publicReports.length, pct:100, icon:'clipboard', bg:'#3A3D44', urgent:false },
     { label:'Belum Ditangani', value: counts.belum, pct:Math.round(counts.belum/total*100), icon:'alarmClock', bg:'#5A2323', urgent:false },
     { label:'Dalam Penanganan', value: counts.tinjauan + counts.proses, pct:Math.round((counts.tinjauan+counts.proses)/total*100), icon:'wrench', bg:'#5A4419', urgent:false },
     { label:'Selesai', value: counts.selesai, pct:Math.round(counts.selesai/total*100), icon:'checkCircle', bg:'#1F4A2E', urgent:false },
@@ -2244,7 +2367,7 @@ function updateHeaderStats(counts){
 
 function renderRecentList(){
   const box = document.getElementById('recentList');
-  const recent = [...reports].sort((a,b)=> b.createdAt - a.createdAt).slice(0, 6);
+  const recent = [...publicReports].sort((a,b)=> b.createdAt - a.createdAt).slice(0, 6);
 
   if(recent.length === 0){
     box.innerHTML = `
@@ -2413,6 +2536,109 @@ function exitAdmin(){
 }
 document.getElementById('adExitBtn').addEventListener('click', exitAdmin);
 document.getElementById('adExitBtn2').addEventListener('click', exitAdmin);
+
+/* =========================================================
+   CEK STATUS LAPORAN (lewat ID Tiket)
+   Warga yang lupa/tutup browser setelah mengirim laporan tetap
+   bisa mengecek status penanganannya kapan saja, tanpa perlu
+   login atau mengingat lokasi persisnya — cukup nomor tiket
+   yang diberikan saat pengiriman berhasil.
+========================================================= */
+const ticketModal = document.getElementById('ticketModal');
+document.getElementById('checkTicketBtn').addEventListener('click', ()=>{
+  ticketModal.hidden = false;
+  document.getElementById('ticketInput').value = '';
+  document.getElementById('ticketResult').innerHTML = '';
+  document.getElementById('ticketInput').focus();
+});
+document.getElementById('closeTicketModal').addEventListener('click', ()=> ticketModal.hidden = true);
+
+const aboutModal = document.getElementById('aboutModal');
+document.getElementById('aboutBtn').addEventListener('click', ()=> aboutModal.hidden = false);
+document.getElementById('closeAboutModal').addEventListener('click', ()=> aboutModal.hidden = true);
+document.getElementById('closeAboutModalBtn').addEventListener('click', ()=> aboutModal.hidden = true);
+
+/* =========================================================
+   LAPORAN SAYA
+   Daftar semua laporan yang pernah dikirim dari uid anonim yang
+   sedang aktif di browser/perangkat ini (bukan dari akun — Jagarute
+   tidak pakai login warga, jadi ini terikat ke perangkat & browser,
+   bukan identitas orangnya). Kalau warga ganti perangkat/browser atau
+   membersihkan data situs, riwayat ini tidak akan ikut — untuk kasus
+   itu, gunakan fitur "Cek Status" dengan nomor tiket yang sudah dicatat
+   sendiri saat pertama melapor.
+========================================================= */
+const myReportsModal = document.getElementById('myReportsModal');
+document.getElementById('myReportsBtn').addEventListener('click', async ()=>{
+  myReportsModal.hidden = false;
+  await renderMyReports();
+});
+document.getElementById('closeMyReportsModal').addEventListener('click', ()=> myReportsModal.hidden = true);
+
+async function renderMyReports(){
+  const box = document.getElementById('myReportsBody');
+  box.innerHTML = `<div class="empty-state"><div>Memuat...</div></div>`;
+  await authReady;
+  if(!currentUid){
+    box.innerHTML = `<div class="empty-state"><div class="es-title">Gagal memuat</div><div>Coba muat ulang halaman.</div></div>`;
+    return;
+  }
+  const mine = reports.filter(r => r.uid === currentUid).sort((a,b)=> b.createdAt - a.createdAt);
+  if(mine.length === 0){
+    box.innerHTML = `
+      <div class="empty-state">
+        <div class="es-title">Belum ada laporan dari perangkat ini</div>
+        <div>Laporan yang kamu kirim dari browser ini akan muncul di sini.</div>
+      </div>`;
+    return;
+  }
+  box.innerHTML = mine.map(r=>{
+    const meta = STATUS_META[r.status];
+    return `
+      <button type="button" class="ws-list-item" data-id="${r.id}" style="margin-bottom:.5rem;">
+        <div class="wli-head">
+          <div class="wli-jalan">${escapeHtml(r.namaJalan)}</div>
+          <span class="status-pill" style="background:${meta.hex};font-size:.66rem;">${meta.label}</span>
+        </div>
+        <div class="wli-meta">Tiket <span style="font-family:var(--font-mono);">${r.ticketId}</span> · ${escapeHtml(r.jenisKerusakan)} · ${daysSince(r.createdAt)} hari lalu</div>
+        ${!r.verified ? `<div class="wli-meta" style="color:var(--status-tinjauan);">${icon('alertTriangle',12)} Masih menunggu verifikasi admin</div>` : ''}
+      </button>
+    `;
+  }).join('');
+  box.querySelectorAll('.ws-list-item').forEach(el=>{
+    el.addEventListener('click', ()=>{ myReportsModal.hidden = true; openDetail(el.dataset.id); });
+  });
+}
+document.getElementById('ticketSearchBtn').addEventListener('click', searchByTicket);
+document.getElementById('ticketInput').addEventListener('keydown', e=>{ if(e.key==='Enter') searchByTicket(); });
+
+function searchByTicket(){
+  const raw = document.getElementById('ticketInput').value.trim().toUpperCase();
+  const resultBox = document.getElementById('ticketResult');
+  if(!raw){ resultBox.innerHTML = `<div class="empty-state"><div>Masukkan ID tiket dulu ya.</div></div>`; return; }
+  // Data laporan sudah ada di memori (real-time sync), jadi pencarian
+  // dilakukan lokal — tidak perlu query tambahan ke Firestore.
+  const r = reports.find(x => (x.ticketId || '').toUpperCase() === raw);
+  if(!r){
+    resultBox.innerHTML = `
+      <div class="empty-state">
+        <div class="es-title">Tiket tidak ditemukan</div>
+        <div>Cek kembali ID tiket kamu, atau laporan mungkin masih dalam proses sinkronisasi.</div>
+      </div>`;
+    return;
+  }
+  const meta = STATUS_META[r.status];
+  resultBox.innerHTML = `
+    <div class="rc-card" style="border:1px solid var(--chrome-border);border-radius:var(--radius-md);padding:.9rem;">
+      <div class="wli-head" style="margin-bottom:.4rem;">
+        <div class="wli-jalan">${escapeHtml(r.namaJalan)}</div>
+        <span class="status-pill" style="background:${meta.hex};">${meta.label}</span>
+      </div>
+      <div class="wli-meta">${escapeHtml(r.jenisKerusakan)} · ${LEVEL_META[r.level].label} · dilaporkan ${daysSince(r.createdAt)} hari lalu</div>
+      <div class="wli-meta">${icon('thumbsUp',13)} ${r.confirmCount} warga mengonfirmasi</div>
+      <button type="button" class="popup-btn" style="margin-top:.6rem;" onclick="document.getElementById('ticketModal').hidden=true; openDetail('${r.id}')">Lihat Detail Lengkap</button>
+    </div>`;
+}
 
 /* ---- Navigasi tab sidebar admin ---- */
 function switchAdminTab(tab){
@@ -2694,35 +2920,50 @@ function renderMasterData(){
 }
 
 let adminSortMode = 'priority';
+let adminFilterMode = 'semua'; // 'semua' | 'urgent' | 'pending'
 
 function renderAdminList(){
   const box = document.getElementById('adLaporanContent');
   const belum = reports.filter(r=>r.status==='belum').length;
   const urgentCount = reports.filter(isUrgent).length;
+  const pendingCount = reports.filter(r=>!r.verified).length;
 
-  const sorted = [...reports].sort((a,b)=>{
+  const filterFns = {
+    semua: ()=> true,
+    urgent: r => isUrgent(r),
+    pending: r => !r.verified,
+  };
+  const sorted = [...reports].filter(filterFns[adminFilterMode]).sort((a,b)=>{
     if(adminSortMode === 'priority') return priorityScore(b) - priorityScore(a);
     return b.createdAt - a.createdAt;
   });
 
   box.innerHTML = `
-    <div class="admin-summary">${reports.length} laporan masuk · ${belum} belum ditindaklanjuti${urgentCount ? ` · <span style="color:var(--status-belum)">${urgentCount} perlu segera</span>` : ''}</div>
+    <div class="admin-summary">${reports.length} laporan masuk · ${belum} belum ditindaklanjuti${urgentCount ? ` · <span style="color:var(--status-belum)">${urgentCount} perlu segera</span>` : ''}${pendingCount ? ` · <span style="color:var(--status-tinjauan)">${pendingCount} menunggu verifikasi</span>` : ''}</div>
     ${trendChartHtml()}
     <div class="admin-toolbar">
       <div class="sort-toggle">
         <button type="button" class="sort-btn ${adminSortMode==='priority'?'active':''}" data-sort="priority">Prioritas</button>
         <button type="button" class="sort-btn ${adminSortMode==='newest'?'active':''}" data-sort="newest">Terbaru</button>
       </div>
+      <div class="sort-toggle">
+        <button type="button" class="sort-btn ${adminFilterMode==='semua'?'active':''}" data-filter="semua">Semua</button>
+        <button type="button" class="sort-btn ${adminFilterMode==='urgent'?'active':''}" data-filter="urgent">${icon('alertTriangle',13)} Perlu Segera${urgentCount ? ` (${urgentCount})` : ''}</button>
+        <button type="button" class="sort-btn ${adminFilterMode==='pending'?'active':''}" data-filter="pending">${icon('checkCircle',13)} Menunggu Verifikasi${pendingCount ? ` (${pendingCount})` : ''}</button>
+      </div>
       <div class="export-actions">
         <button type="button" id="exportCsvBtn">${icon('download',15)} CSV</button>
         <button type="button" id="exportPdfBtn">${icon('printer',15)} PDF</button>
       </div>
     </div>
-    ${sorted.length === 0 ? `<div class="ad-empty-state">Belum ada laporan yang masuk.</div>` : sorted.map(reportCardHtml).join('')}
+    ${sorted.length === 0 ? `<div class="ad-empty-state">Tidak ada laporan yang cocok dengan filter ini.</div>` : sorted.map(reportCardHtml).join('')}
   `;
 
-  box.querySelectorAll('.sort-btn').forEach(btn=>{
+  box.querySelectorAll('.sort-btn[data-sort]').forEach(btn=>{
     btn.addEventListener('click', ()=>{ adminSortMode = btn.dataset.sort; renderAdminList(); });
+  });
+  box.querySelectorAll('.sort-btn[data-filter]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ adminFilterMode = btn.dataset.filter; renderAdminList(); });
   });
   document.getElementById('exportCsvBtn').addEventListener('click', exportCsv);
   document.getElementById('exportPdfBtn').addEventListener('click', exportPdf);
@@ -2739,6 +2980,7 @@ function renderAdminList(){
         try{
           await reportsCol.doc(r.id).update(update);
           showToast(`Status "${r.namaJalan}" diperbarui menjadi "${STATUS_META[newStatus].label}".`);
+          notifyStatusChange(r.id, newStatus);
         } catch(err){
           console.error(err);
           showToast('Gagal memperbarui status. Coba lagi.', 'error');
@@ -2748,6 +2990,23 @@ function renderAdminList(){
     }
     const btnMap = document.getElementById('map-'+r.id);
     if(btnMap) btnMap.addEventListener('click', ()=> openDetail(r.id));
+
+    const btnVerify = document.getElementById('verify-'+r.id);
+    if(btnVerify){
+      btnVerify.addEventListener('click', async ()=>{
+        btnVerify.disabled = true;
+        btnVerify.textContent = 'Memverifikasi...';
+        try{
+          await reportsCol.doc(r.id).update({ verified: true });
+          showToast(`Laporan "${r.namaJalan}" sudah tayang ke publik.`);
+        } catch(err){
+          console.error(err);
+          showToast('Gagal memverifikasi laporan. Coba lagi.', 'error');
+          btnVerify.disabled = false;
+          btnVerify.textContent = icon('checkCircle',14) + ' Verifikasi & Tayangkan';
+        }
+      });
+    }
   });
 }
 
@@ -2838,7 +3097,7 @@ function reportCardHtml(r){
     <div class="report-card ${isUrgent(r) ? 'urgent' : ''}">
       <div class="report-card-head">
         <div>
-          <div class="rc-jalan">${escapeHtml(r.namaJalan)}${isUrgent(r) ? ` <span class="urgent-badge">${icon('alertTriangle',12)} Segera</span>` : ''}</div>
+          <div class="rc-jalan">${escapeHtml(r.namaJalan)}${isUrgent(r) ? ` <span class="urgent-badge">${icon('alertTriangle',12)} Segera</span>` : ''}${!r.verified ? ` <span class="urgent-badge" style="background:var(--status-tinjauan);">${icon('alertTriangle',12)} Menunggu Verifikasi</span>` : ''}</div>
           <div class="rc-meta">${escapeHtml(r.jenisKerusakan)} · ${LEVEL_META[r.level].label} · ${daysSince(r.createdAt)} hari lalu</div>
         </div>
         <span class="ticket-tag" style="font-size:.72rem;margin-bottom:0;">${r.ticketId}</span>
@@ -2850,6 +3109,7 @@ function reportCardHtml(r){
       </select>
       <div class="rc-actions">
         <button type="button" id="map-${r.id}">${icon('pin',14)} Lihat di Peta</button>
+        ${!r.verified ? `<button type="button" id="verify-${r.id}" style="color:var(--status-selesai);">${icon('checkCircle',14)} Verifikasi &amp; Tayangkan</button>` : ''}
       </div>
     </div>
   `;
@@ -2860,7 +3120,7 @@ function reportFormHtml(){
     <form id="reportForm">
       <div class="field">
         <label for="repJalan">Nama Jalan *</label>
-        <input type="text" id="repJalan" required placeholder="Contoh: Jl. Asia Afrika No. 10">
+        <input type="text" id="repJalan" required minlength="4" maxlength="120" placeholder="Contoh: Jl. Asia Afrika No. 10" oninput="this.dataset.userEdited='1'">
       </div>
 
       <div class="field">
@@ -2893,6 +3153,7 @@ function reportFormHtml(){
           <button type="button" class="btn-secondary" id="pickFromMapBtn">${icon('map')} Pilih di Peta</button>
         </div>
         <div class="coord-readout" id="coordReadout">Belum ada lokasi dipilih</div>
+        <div id="nearbyWarning"></div>
       </div>
 
       <div class="field">
@@ -2906,7 +3167,7 @@ function reportFormHtml(){
 
       <div class="field">
         <label for="repNama">Nama Lengkap Pelapor *</label>
-        <input type="text" id="repNama" required placeholder="Nama Anda">
+        <input type="text" id="repNama" required minlength="3" maxlength="80" placeholder="Nama Anda">
       </div>
       <div class="field">
         <label for="repEmail">Email *</label>
@@ -2914,7 +3175,14 @@ function reportFormHtml(){
       </div>
       <div class="field">
         <label for="repTelp">No. Telepon / WhatsApp *</label>
-        <input type="tel" id="repTelp" required placeholder="08xxxxxxxxxx">
+        <input type="tel" id="repTelp" required pattern="0[0-9]{9,13}" title="Nomor HP Indonesia, diawali 0, 10-14 digit angka saja (contoh: 081234567890)" placeholder="08xxxxxxxxxx">
+      </div>
+
+      <div class="field">
+        <label style="display:flex;align-items:center;gap:.5rem;font-weight:600;cursor:pointer;">
+          <input type="checkbox" id="repNotif" style="width:auto;">
+          Beri tahu saya di browser ini kalau status laporan berubah
+        </label>
       </div>
 
       <button type="submit" class="btn-submit">Kirim Laporan</button>
@@ -2924,11 +3192,24 @@ function reportFormHtml(){
 
 function wireReportForm(){
   tempLat = null; tempLng = null;
+  let selectedFotoFile = null;
+  const MAX_FOTO_BYTES = 5 * 1024 * 1024; // 5MB
 
   document.getElementById('repFoto').addEventListener('change', e=>{
     const file = e.target.files[0];
     const img = document.getElementById('repFotoPreview');
+    selectedFotoFile = null;
     if(file){
+      if(file.size > MAX_FOTO_BYTES){
+        showToast('Ukuran foto maksimal 5MB. Coba kompres atau pakai foto lain.', 'error');
+        e.target.value = '';
+        img.style.display = 'none';
+        return;
+      }
+      selectedFotoFile = file;
+      // FileReader di sini HANYA untuk pratinjau di browser (tidak dikirim
+      // ke server dalam bentuk base64) — file asli yang diupload nanti
+      // langsung ke Firebase Storage saat form disubmit.
       const reader = new FileReader();
       reader.onload = ev=>{ img.src = ev.target.result; img.style.display='block'; };
       reader.readAsDataURL(file);
@@ -2960,25 +3241,49 @@ function wireReportForm(){
       showToast('Pilih lokasi jalan rusak terlebih dahulu.', 'error');
       return;
     }
-    const level = document.querySelector('input[name=repLevel]:checked');
-    const foto = document.getElementById('repFotoPreview');
-    const fotoDataUrl = foto.style.display==='block' ? foto.src : null;
-
-    // Firestore membatasi ukuran 1 dokumen ~1MB; foto base64 yang
-    // terlalu besar akan gagal disimpan, jadi dicek dulu di sini.
-    if(fotoDataUrl && fotoDataUrl.length > 700000){
-      showToast('Foto terlalu besar. Coba pakai foto dengan resolusi lebih kecil.', 'error');
+    if(!selectedFotoFile){
+      showToast('Unggah foto bukti kerusakan terlebih dahulu.', 'error');
       return;
     }
+    const level = document.querySelector('input[name=repLevel]:checked');
 
     const submitBtn = e.target.querySelector('.btn-submit');
     submitBtn.disabled = true;
-    submitBtn.textContent = 'Mengirim...';
+    submitBtn.textContent = 'Mengunggah foto...';
 
     const ticketId = genTicket();
     try{
       await authReady;
       if(!currentUid) throw new Error('Sesi belum siap, coba lagi sesaat lagi.');
+
+      // 1) Upload foto ke Firebase Storage dulu (bukan base64 di Firestore
+      //    — Firestore dibatasi ~1MB/dokumen dan tidak efisien untuk file
+      //    biner besar). Nama file disisipi uid+timestamp supaya unik dan
+      //    tertata per pelapor.
+      const safeName = selectedFotoFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const storageRef = storage.ref(`laporan-foto/${currentUid}/${Date.now()}_${safeName}`);
+      let fotoUrl;
+      try{
+        await storageRef.put(selectedFotoFile, { contentType: selectedFotoFile.type });
+        fotoUrl = await storageRef.getDownloadURL();
+      } catch(uploadErr){
+        console.error('Gagal upload foto:', uploadErr);
+        showToast('Gagal mengunggah foto. Cek koneksi internet kamu, atau coba pakai foto dengan ukuran lebih kecil.', 'error');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Kirim Laporan';
+        return;
+      }
+
+      submitBtn.textContent = 'Mengirim laporan...';
+
+      // Kalau warga centang opt-in notifikasi, minta izin & ambil token FCM
+      // di sini — TIDAK fatal kalau gagal/ditolak (fcmToken jadi null saja,
+      // laporan tetap terkirim seperti biasa, cuma tidak dapat notifikasi).
+      const wantNotif = document.getElementById('repNotif').checked;
+      const fcmToken = wantNotif ? await getNotifToken() : null;
+
+      // 2) Baru simpan dokumen laporan di Firestore, isi fotoUrl dengan
+      //    link Storage (bukan base64).
       await reportsCol.add({
         ticketId,
         uid: currentUid,
@@ -2992,18 +3297,28 @@ function wireReportForm(){
           email: document.getElementById('repEmail').value.trim(),
           telp: document.getElementById('repTelp').value.trim(),
         },
-        fotoDataUrl,
+        fotoUrl,
+        fcmToken: fcmToken || null,
         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
         confirmCount: 0,
+        verified: false,
       });
       exitPickMode();
       closePanel();
-      showToast(`Laporan terkirim. ID Tiket Anda: ${ticketId}`);
+      showToast(`Laporan terkirim. ID Tiket Anda: ${ticketId}. Laporan akan tayang publik setelah diverifikasi admin.`);
     } catch(err){
       console.error(err);
       submitBtn.disabled = false;
       submitBtn.textContent = 'Kirim Laporan';
-      showToast('Gagal mengirim laporan. Cek koneksi internet kamu dan coba lagi.', 'error');
+      // Pesan berbeda untuk kasus yang paling sering terjadi, supaya
+      // warga tahu harus ngapain — bukan cuma "terjadi kesalahan".
+      if(err?.code === 'permission-denied'){
+        showToast('Laporan ditolak sistem karena data tidak lengkap/valid. Cek kembali isian form kamu.', 'error');
+      } else if(!navigator.onLine){
+        showToast('Kamu sedang offline. Sambungkan ke internet dan coba kirim lagi.', 'error');
+      } else {
+        showToast('Gagal mengirim laporan. Cek koneksi internet kamu dan coba lagi.', 'error');
+      }
     }
   });
 }
@@ -3013,6 +3328,59 @@ function setTempLocation(lat,lng){
   document.getElementById('coordReadout').textContent = `Lat: ${lat.toFixed(5)}, Lng: ${lng.toFixed(5)}`;
   if(tempPickMarker) map.removeLayer(tempPickMarker);
   tempPickMarker = L.marker([lat,lng], { icon: L.divIcon({ html:'<div class="temp-marker"></div>', className:'', iconSize:[22,22], iconAnchor:[11,11] }) }).addTo(map);
+  renderNearbyWarning(lat, lng);
+  suggestNamaJalan(lat, lng);
+}
+
+// Reverse geocoding pakai Nominatim (OpenStreetMap) — gratis, tanpa API
+// key, tapi kebijakan penggunaannya membatasi ~1 request/detik dan wajib
+// disertai User-Agent/Referer yang jelas (otomatis terkirim dari browser).
+// Ini HANYA mengisi saran awal nama jalan — warga tetap bisa & sebaiknya
+// mengoreksi manual kalau hasilnya kurang tepat, karena data OSM tidak
+// selalu lengkap/akurat untuk jalan-jalan kecil di Indonesia.
+let geocodeRequestId = 0;
+async function suggestNamaJalan(lat, lng){
+  const jalanInput = document.getElementById('repJalan');
+  if(!jalanInput) return;
+  // Jangan timpa kalau warga sudah mulai mengetik sendiri.
+  if(jalanInput.value.trim().length > 0 && jalanInput.dataset.userEdited === '1') return;
+
+  const thisRequestId = ++geocodeRequestId;
+  jalanInput.placeholder = 'Mencari nama jalan...';
+  try{
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=17&addressdetails=1`, {
+      headers: { 'Accept-Language': 'id' }
+    });
+    if(thisRequestId !== geocodeRequestId) return; // ada request lokasi baru menyusul, abaikan hasil lama
+    if(!res.ok) throw new Error('reverse-geocode-failed');
+    const data = await res.json();
+    const jalan = data?.address?.road || data?.address?.pedestrian || data?.address?.suburb;
+    if(jalan && jalanInput.dataset.userEdited !== '1'){
+      jalanInput.value = jalan;
+    }
+  } catch(e){
+    console.error('Reverse geocoding gagal (tidak fatal, warga tetap bisa isi manual):', e);
+  } finally {
+    if(thisRequestId === geocodeRequestId) jalanInput.placeholder = 'Contoh: Jl. Asia Afrika No. 10';
+  }
+}
+
+// Warga sering tidak sadar laporan yang sama sudah pernah dibuat orang
+// lain di titik yang persis sama. Daripada numpuk marker, kita tawarkan
+// opsi "konfirmasi laporan yang sudah ada" begitu lokasi yang dipilih
+// berjarak dekat (<40m) dengan laporan yang belum selesai ditangani.
+function renderNearbyWarning(lat, lng){
+  const box = document.getElementById('nearbyWarning');
+  if(!box) return;
+  const nearby = findNearbyReports(lat, lng);
+  if(nearby.length === 0){ box.innerHTML = ''; return; }
+  box.innerHTML = `
+    <div class="nearby-alert" style="margin-top:.6rem;padding:.7rem .9rem;border-radius:var(--radius-sm);background:rgba(240,136,62,.12);border:1px solid var(--status-tinjauan);font-size:.85rem;">
+      ${icon('alertTriangle',15)} Sudah ada ${nearby.length} laporan belum selesai dalam radius 40m dari titik ini
+      (${escapeHtml(nearby[0].namaJalan)}). Kalau ini kerusakan yang sama, lebih baik konfirmasi laporan yang
+      sudah ada daripada bikin laporan baru.
+      <button type="button" class="popup-btn" style="margin-top:.5rem;" onclick="closePanel(); openDetail('${nearby[0].id}')">Lihat Laporan yang Sudah Ada</button>
+    </div>`;
 }
 
 map.on('click', (e)=>{
@@ -3050,6 +3418,7 @@ function renderDetailPanel(r){
       try{
         await reportsCol.doc(r.id).update(update);
         showToast('Status laporan diperbarui.');
+        notifyStatusChange(r.id, newStatus);
       } catch(err){
         console.error(err);
         showToast('Gagal memperbarui status. Coba lagi.', 'error');
@@ -3126,6 +3495,27 @@ function showToast(msg, type=''){
    Claude, sebagai jalan pintas supaya tetap bisa dites di sini.
 ========================================================= */
 const AI_BACKEND_URL = '/.netlify/functions/ask-ai';
+const NOTIFY_BACKEND_URL = '/.netlify/functions/notify-status';
+
+/* Memicu notifikasi push ke pelapor saat admin mengubah status.
+   "Fire-and-forget" dengan sengaja — kalau gagal (mis. token FCM
+   pelapor sudah kedaluwarsa, atau pelapor tidak opt-in notifikasi
+   sama sekali), itu TIDAK boleh mengganggu alur kerja admin yang
+   sudah berhasil mengubah status di Firestore. Backend (bukan
+   client) yang membaca token & mengirim pesan sungguhan, supaya
+   admin tidak perlu tahu/pegang token FCM siapa pun secara langsung. */
+async function notifyStatusChange(reportId, newStatus){
+  try{
+    const idToken = await auth.currentUser.getIdToken();
+    await fetch(NOTIFY_BACKEND_URL, {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'Authorization': `Bearer ${idToken}` },
+      body: JSON.stringify({ reportId, newStatus }),
+    });
+  } catch(e){
+    console.error('Gagal mengirim notifikasi status (tidak fatal):', e);
+  }
+}
 const aiFab = document.getElementById('aiFab');
 const aiPanel = document.getElementById('aiPanel');
 const aiMessagesBox = document.getElementById('aiMessages');
@@ -3157,18 +3547,22 @@ function pushAiMessage(role, text){
 }
 
 function buildAiContext(){
+  // Sengaja pakai publicReports (bukan `reports` penuh) — laporan yang
+  // masih menunggu verifikasi admin tidak boleh ikut dijawabkan ke
+  // publik lewat chatbot ini, supaya konsisten dengan apa yang memang
+  // sudah tayang di peta & daftar publik.
   const counts = { belum:0, tinjauan:0, proses:0, selesai:0 };
-  reports.forEach(r=> counts[r.status]++);
-  const urgent = reports.filter(isUrgent)
+  publicReports.forEach(r=> counts[r.status]++);
+  const urgent = publicReports.filter(isUrgent)
     .sort((a,b)=> priorityScore(b) - priorityScore(a))
     .slice(0,5)
     .map(r=> `${r.namaJalan} (level ${r.level}, ${daysSince(r.createdAt)} hari, ${r.confirmCount} konfirmasi warga)`);
-  const daftarJalan = reports.map(r=> `${r.namaJalan}: ${r.jenisKerusakan}, ${LEVEL_META[r.level].label}, status ${STATUS_META[r.status].label}, ${daysSince(r.createdAt)} hari lalu, ${r.confirmCount} konfirmasi warga`);
+  const daftarJalan = publicReports.map(r=> `${r.namaJalan}: ${r.jenisKerusakan}, ${LEVEL_META[r.level].label}, status ${STATUS_META[r.status].label}, ${daysSince(r.createdAt)} hari lalu, ${r.confirmCount} konfirmasi warga`);
 
   return `Kamu adalah asisten AI untuk aplikasi Jagarute, WebGIS pemantauan kerusakan jalan.
 Jawab pertanyaan pengguna HANYA berdasarkan data laporan berikut, singkat dan dalam Bahasa Indonesia (maksimal 4-5 kalimat).
 
-Ringkasan: total ${reports.length} laporan — ${counts.belum} belum ditangani, ${counts.tinjauan} dalam tinjauan, ${counts.proses} dalam proses, ${counts.selesai} selesai.
+Ringkasan: total ${publicReports.length} laporan — ${counts.belum} belum ditangani, ${counts.tinjauan} dalam tinjauan, ${counts.proses} dalam proses, ${counts.selesai} selesai.
 Laporan paling mendesak: ${urgent.join('; ') || 'tidak ada yang mendesak saat ini'}.
 
 Daftar semua laporan:
@@ -3285,7 +3679,7 @@ async function sendAiMessage(presetText){
     const def = WS_CATS[cat];
     if(!def) return;
     listTitle.textContent = def.label;
-    const matched = reports.filter(def.filter).sort((a,b)=> b.createdAt - a.createdAt);
+    const matched = publicReports.filter(def.filter).sort((a,b)=> b.createdAt - a.createdAt);
     listBody.innerHTML = matched.length ? matched.map(r=>`
       <button type="button" class="ws-list-item" data-id="${r.id}">
         <div class="wli-head">
@@ -3309,7 +3703,7 @@ async function sendAiMessage(presetText){
   function wsUpdateCounts(){
     Object.keys(WS_CATS).forEach(cat=>{
       const el = document.getElementById('wsCount-' + cat);
-      if(el) el.textContent = reports.filter(WS_CATS[cat].filter).length;
+      if(el) el.textContent = publicReports.filter(WS_CATS[cat].filter).length;
     });
   }
 
