@@ -1453,9 +1453,11 @@ input,select{ font-family:inherit; }
     <button id="closeLoginModal" class="modal-close" aria-label="Tutup">✕</button>
     <h3>Masuk Mode Admin</h3>
     <p class="hint" style="margin-bottom:1rem;">Untuk tim teknis memverifikasi laporan dan memperbarui status penanganan.</p>
-    <label for="adminPass" style="display:block;font-weight:700;font-size:.85rem;margin-bottom:.4rem;">Kode Akses</label>
-    <input id="adminPass" type="password" placeholder="Masukkan kode akses">
-    <div id="loginError" class="login-error" hidden><span data-icon="alertTriangle" data-icon-size="15"></span> Kode akses salah. Coba lagi.</div>
+    <label for="adminEmail" style="display:block;font-weight:700;font-size:.85rem;margin-bottom:.4rem;">Email</label>
+    <input id="adminEmail" type="email" placeholder="nama@instansi.go.id" autocomplete="username" style="width:100%;min-height:46px;border:2px solid var(--concrete-dark);border-radius:var(--radius-sm);padding:0 .8rem;font-size:1rem;background:var(--surface);color:var(--ink);margin-bottom:.7rem;">
+    <label for="adminPass" style="display:block;font-weight:700;font-size:.85rem;margin-bottom:.4rem;">Kata Sandi</label>
+    <input id="adminPass" type="password" placeholder="Masukkan kata sandi" autocomplete="current-password">
+    <div id="loginError" class="login-error" hidden><span data-icon="alertTriangle" data-icon-size="15"></span> Email atau kata sandi salah.</div>
     <button id="loginSubmitBtn" class="btn-submit" style="border-radius:var(--radius-sm);margin-top:1rem;">Masuk</button>
   </div>
 </div>
@@ -1486,6 +1488,7 @@ input,select{ font-family:inherit; }
 
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script>
@@ -1515,7 +1518,46 @@ const firebaseConfig = {
 };
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
+const auth = firebase.auth();
 const reportsCol = db.collection('laporan');
+const adminsCol = db.collection('admins');
+
+/* =========================================================
+   AUTENTIKASI (menggantikan "kode akses" hardcoded di client)
+   - Setiap pengunjung otomatis login anonim (auth.signInAnonymously),
+     jadi setiap laporan/konfirmasi terhubung ke satu UID unik.
+     Ini dipakai Firestore Security Rules untuk membatasi: 1 UID
+     hanya bisa konfirmasi 1x per laporan, dan cuma UID yang
+     terdaftar di koleksi `admins` yang boleh mengubah status.
+   - Login admin memakai Firebase Authentication (email & password)
+     sungguhan, BUKAN string password yang tertulis di source code.
+     Status admin ditentukan dari keberadaan dokumen admins/{uid}
+     di Firestore (dicek lewat rules, bukan variabel JS di client).
+========================================================= */
+let currentUid = null;
+let authReady = (async () => {
+  try{
+    if(!auth.currentUser) await auth.signInAnonymously();
+  } catch(e){ console.error('Gagal login anonim:', e); }
+})();
+
+auth.onAuthStateChanged(async user=>{
+  currentUid = user ? user.uid : null;
+  if(user && !user.isAnonymous){
+    try{
+      const adminDoc = await adminsCol.doc(user.uid).get();
+      isAdmin = adminDoc.exists;
+    } catch(e){ isAdmin = false; }
+    if(isAdmin) enterAdminDashboard();
+    else {
+      showToast('Akun ini tidak terdaftar sebagai admin.', 'error');
+      auth.signInAnonymously();
+    }
+  } else if(user && user.isAnonymous){
+    // pengguna publik (warga) — bukan admin
+    if(isAdmin){ isAdmin = false; }
+  }
+});
 
 const STATUS_META = {
   belum:     { label:'Belum ada tindakan',        color:'var(--status-belum)',    hex:'#E14640', glyph:'!' },
@@ -1647,8 +1689,9 @@ function enterApp(){
 document.getElementById('enterPublicBtn').addEventListener('click', enterApp);
 document.getElementById('enterAdminBtn').addEventListener('click', ()=>{
   document.getElementById('loginModal').hidden = false;
+  document.getElementById('adminEmail').value = '';
   document.getElementById('adminPass').value = '';
-  document.getElementById('adminPass').focus();
+  document.getElementById('adminEmail').focus();
 });
 
 function openRoleGateFromLanding(){
@@ -1981,20 +2024,35 @@ function popupHtml(r){
   `;
 }
 
+/* Sebelumnya confirmCount hanya dijaga oleh `sessionConfirmed` (Set di
+   memori browser) — gampang dilewati (mode incognito, browser lain,
+   atau panggil Firestore langsung dari console). Sekarang setiap
+   konfirmasi WAJIB menyertakan dokumen penanda di subcollection
+   `confirmedBy/{uid}`, dan Firestore Rules menolak update confirmCount
+   kalau dokumen penanda itu belum/tidak ikut dibuat pada request yang
+   sama (lihat firestore.rules — existsAfter check). Jadi satu UID
+   hanya bisa menambah confirmCount tepat satu kali, ditegakkan di
+   server, bukan cuma di UI. */
 async function confirmReport(id){
+  await authReady;
+  if(!currentUid){ showToast('Gagal memverifikasi sesi kamu. Muat ulang halaman.', 'error'); return; }
   if(sessionConfirmed.has(id)){
     showToast('Kamu sudah mengonfirmasi laporan ini sebelumnya.');
     return;
   }
   sessionConfirmed.add(id);
+  const reportRef = reportsCol.doc(id);
+  const markRef = reportRef.collection('confirmedBy').doc(currentUid);
   try{
-    await reportsCol.doc(id).update({
-      confirmCount: firebase.firestore.FieldValue.increment(1)
+    await db.runTransaction(async tx=>{
+      const markSnap = await tx.get(markRef);
+      if(markSnap.exists) throw new Error('sudah-konfirmasi');
+      tx.set(markRef, { confirmedAt: firebase.firestore.FieldValue.serverTimestamp() });
+      tx.update(reportRef, { confirmCount: firebase.firestore.FieldValue.increment(1) });
     });
     showToast('Terima kasih, konfirmasi kamu tercatat.');
   } catch(err){
-    sessionConfirmed.delete(id);
-    console.error(err);
+    if(err.message !== 'sudah-konfirmasi') console.error(err);
     showToast('Gagal mengirim konfirmasi. Coba lagi.', 'error');
   }
 }
@@ -2268,7 +2326,6 @@ document.getElementById('reportFab').addEventListener('click', ()=>{
    yang sama di memori browser ini.
 ========================================================= */
 let isAdmin = false;
-const ADMIN_PASSCODE = 'gausahkepo';
 
 const loginModal = document.getElementById('loginModal');
 const adminDashboard = document.getElementById('adminDashboard');
@@ -2278,10 +2335,11 @@ document.getElementById('adminModeBtn').addEventListener('click', ()=>{
     exitAdmin();
   } else {
     loginModal.hidden = false;
+    document.getElementById('adminEmail').value = '';
     document.getElementById('adminPass').value = '';
     document.getElementById('adminPass').classList.remove('input-error');
     document.getElementById('loginError').hidden = true;
-    document.getElementById('adminPass').focus();
+    document.getElementById('adminEmail').focus();
   }
 });
 document.getElementById('closeLoginModal').addEventListener('click', ()=> loginModal.hidden = true);
@@ -2292,35 +2350,56 @@ document.getElementById('adminPass').addEventListener('input', ()=>{
   document.getElementById('adminPass').classList.remove('input-error');
 });
 
-function doLogin(){
+/* doLogin sekarang memverifikasi via Firebase Authentication di server
+   Google, bukan membandingkan string di JS client. Status admin baru
+   dikonfirmasi ASLI setelah dicek ke koleksi Firestore `admins`
+   (lihat onAuthStateChanged) — supaya UI admin tidak pernah terbuka
+   hanya karena tebakan/manipulasi variabel di console browser. */
+async function doLogin(){
+  const emailInput = document.getElementById('adminEmail');
   const passInput = document.getElementById('adminPass');
   const loginError = document.getElementById('loginError');
-  const val = passInput.value.trim();
-  if(val === ADMIN_PASSCODE){
+  const email = emailInput.value.trim();
+  const pass = passInput.value;
+  const submitBtn = document.getElementById('loginSubmitBtn');
+  submitBtn.disabled = true;
+  try{
+    await auth.signInWithEmailAndPassword(email, pass);
+    const adminDoc = await adminsCol.doc(auth.currentUser.uid).get();
+    if(!adminDoc.exists){
+      await auth.signInAnonymously();
+      throw new Error('not-admin');
+    }
     isAdmin = true;
     loginError.hidden = true;
     passInput.classList.remove('input-error');
     loginModal.hidden = true;
-    roleGate.hidden = true;
-    appRoot.hidden = true;
-    adminDashboard.hidden = false;
-    document.getElementById('adminTag').hidden = false;
-    document.getElementById('reportFab').style.display = 'none';
-    switchAdminTab('dashboard');
-    refreshAdminDashboard();
     showToast('Berhasil masuk sebagai admin.');
-  } else {
-    // Notifikasi langsung di dalam modal (toast di belakang overlay modal tidak akan terlihat)
+  } catch(err){
     loginError.hidden = false;
-    passInput.classList.remove('input-error');
-    void passInput.offsetWidth; // reset animasi shake supaya bisa diulang tiap kali salah
+    void passInput.offsetWidth;
     passInput.classList.add('input-error');
     passInput.select();
-    passInput.focus();
+    console.error('Login admin gagal:', err);
+  } finally {
+    submitBtn.disabled = false;
   }
 }
 
+/* Dipanggil otomatis oleh onAuthStateChanged begitu status admin
+   terverifikasi lewat koleksi admins/{uid} di Firestore. */
+function enterAdminDashboard(){
+  roleGate.hidden = true;
+  appRoot.hidden = true;
+  adminDashboard.hidden = false;
+  document.getElementById('adminTag').hidden = false;
+  document.getElementById('reportFab').style.display = 'none';
+  switchAdminTab('dashboard');
+  refreshAdminDashboard();
+}
+
 function exitAdmin(){
+  auth.signInAnonymously(); // keluar dari sesi admin, kembali jadi warga anonim
   isAdmin = false;
   adminDashboard.hidden = true;
   appRoot.hidden = false;
@@ -2898,8 +2977,11 @@ function wireReportForm(){
 
     const ticketId = genTicket();
     try{
+      await authReady;
+      if(!currentUid) throw new Error('Sesi belum siap, coba lagi sesaat lagi.');
       await reportsCol.add({
         ticketId,
+        uid: currentUid,
         namaJalan: document.getElementById('repJalan').value.trim(),
         lat: tempLat, lng: tempLng,
         jenisKerusakan: document.getElementById('repJenis').value,
@@ -3094,26 +3176,32 @@ ${daftarJalan.join('\n')}`;
 }
 
 async function callAiBackend(payload){
-  // Coba backend sendiri dulu (aman, API key tersembunyi di server).
-  // Model AI-nya ditentukan di sisi server (ask-ai.js), bukan di sini.
-  try{
-    const res = await fetch(AI_BACKEND_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if(res.ok) return await res.json();
-    console.error('Backend AI merespons error:', res.status, await res.text());
-  } catch(e){ console.error('Backend AI tidak terjangkau:', e); }
-
-  // Fallback: panggilan langsung (hanya berhasil di dalam preview Claude)
-  const res2 = await fetch('https://api.anthropic.com/v1/messages', {
+  // SATU-SATUNYA jalur yang diizinkan: backend sendiri (Cloud Function/
+  // Netlify Function), tempat API key Anthropic disimpan sebagai env
+  // var/secret di server — TIDAK PERNAH terkirim ke browser.
+  //
+  // Fallback lama yang memanggil api.anthropic.com langsung dari client
+  // sudah DIHAPUS: itu mengharuskan API key ditaruh di kode front-end,
+  // yang berarti siapa pun bisa membukanya lewat DevTools dan memakai
+  // kuota/tagihan API kamu tanpa batas. Model AI & rate limiting kini
+  // sepenuhnya ditentukan di server (lihat contoh functions/ask-ai.js),
+  // yang juga memverifikasi Firebase ID token pemanggil sebelum meneruskan
+  // ke Anthropic, supaya endpoint ini tidak bisa disalahgunakan bot.
+  const idToken = currentUid ? await auth.currentUser.getIdToken() : null;
+  const res = await fetch(AI_BACKEND_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...payload, model: 'claude-sonnet-4-6' })
+    headers: {
+      'Content-Type': 'application/json',
+      ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {})
+    },
+    body: JSON.stringify(payload)
   });
-  if(!res2.ok) throw new Error('Kedua jalur (backend & fallback) gagal merespons.');
-  return await res2.json();
+  if(!res.ok){
+    const errText = await res.text().catch(()=> '');
+    console.error('Backend AI merespons error:', res.status, errText);
+    throw new Error('Backend AI tidak merespons dengan baik.');
+  }
+  return await res.json();
 }
 
 async function sendAiMessage(presetText){
