@@ -1482,10 +1482,16 @@ input,select{ font-family:inherit; }
     <button id="closeAboutModal" class="modal-close" aria-label="Tutup">✕</button>
     <h3>Tentang Jagarute</h3>
     <div class="hint" style="margin-bottom:1rem;line-height:1.6;">
-      <p><strong>Jagarute</strong> adalah platform pemantauan &amp; pelaporan kerusakan jalan berbasis peta, dibuat supaya warga bisa melapor langsung dan memantau progres penanganan secara transparan.</p>
-      <p><strong>Bagaimana laporan diproses?</strong> Setiap laporan baru diperiksa dulu oleh admin sebelum tayang ke publik (mencegah spam/laporan tidak jelas), lalu berpindah status: Belum Ditangani → Dalam Tinjauan → Dalam Proses → Selesai.</p>
+      <p><strong>Jagarute</strong> adalah aplikasi untuk memantau dan melaporkan kerusakan jalan di sekitar kamu. Tujuannya sederhana: mempermudah warga melapor jalan rusak dan memantau progres perbaikannya secara terbuka, sekaligus membantu pemerintah setempat memprioritaskan perbaikan berdasarkan data nyata dari lapangan.</p>
+      <p><strong>Cara melapor:</strong></p>
+      <ol style="margin:0 0 .8rem 1.2rem;padding:0;">
+        <li>Tekan tombol <strong>"Laporkan Jalan Rusak"</strong> di peta.</li>
+        <li>Tandai lokasi jalan rusak (pakai GPS atau pilih langsung di peta).</li>
+        <li>Unggah foto buktinya dan isi data singkat (jenis kerusakan, tingkat keparahan, data diri pelapor).</li>
+        <li>Kirim — kamu akan dapat nomor tiket untuk melacak status laporanmu.</li>
+      </ol>
+      <p>Setiap laporan diperiksa dulu oleh admin sebelum tayang ke publik, lalu statusnya berjalan: Belum Ditangani → Dalam Tinjauan → Dalam Proses → Selesai.</p>
       <p><strong>Privasi data kamu:</strong> Nama, email, dan nomor HP yang kamu isi saat melapor hanya digunakan oleh admin untuk keperluan verifikasi &amp; tindak lanjut laporan — tidak ditampilkan ke publik lain dan tidak dipakai untuk keperluan promosi/pemasaran.</p>
-      <p><strong>Foto bukti</strong> yang kamu unggah tersimpan di layanan cloud (Firebase Storage) dan dapat dilihat publik sebagai bagian dari transparansi laporan (sama seperti data laporan lainnya).</p>
     </div>
     <button id="closeAboutModalBtn" class="btn-submit" style="border-radius:var(--radius-sm);">Mengerti</button>
   </div>
@@ -3213,6 +3219,38 @@ function reportFormHtml(){
   `;
 }
 
+// Kompres foto di sisi browser (resize ke lebar maksimal + turunkan kualitas
+// JPEG) lalu kembalikan sebagai data URL base64. Dipakai supaya foto laporan
+// bisa disimpan langsung di dokumen Firestore tanpa perlu Firebase Storage
+// (yang mewajibkan paket Blaze/billing aktif).
+function compressFotoToDataUrl(file, maxDim, quality){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onerror = ()=> reject(new Error('Gagal membaca file foto.'));
+    reader.onload = ev=>{
+      const img = new Image();
+      img.onerror = ()=> reject(new Error('Gagal memuat foto untuk diproses.'));
+      img.onload = ()=>{
+        let { width, height } = img;
+        if(width > height && width > maxDim){
+          height = Math.round(height * (maxDim / width));
+          width = maxDim;
+        } else if(height >= width && height > maxDim){
+          width = Math.round(width * (maxDim / height));
+          height = maxDim;
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 function wireReportForm(){
   tempLat = null; tempLng = null;
   let selectedFotoFile = null;
@@ -3272,39 +3310,28 @@ function wireReportForm(){
 
     const submitBtn = e.target.querySelector('.btn-submit');
     submitBtn.disabled = true;
-    submitBtn.textContent = 'Mengunggah foto...';
+    submitBtn.textContent = 'Memproses foto...';
 
     const ticketId = genTicket();
     try{
       await authReady;
       if(!currentUid) throw new Error('Sesi belum siap, coba lagi sesaat lagi.');
 
-      // 1) Upload foto ke Firebase Storage dulu (bukan base64 di Firestore
-      //    — Firestore dibatasi ~1MB/dokumen dan tidak efisien untuk file
-      //    biner besar). Nama file disisipi uid+timestamp supaya unik dan
-      //    tertata per pelapor.
-      const safeName = selectedFotoFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-      const storageRef = storage.ref(`laporan-foto/${currentUid}/${Date.now()}_${safeName}`);
-      let fotoUrl;
+      // 1) Kompres foto di browser lalu simpan sebagai base64 langsung di
+      //    dokumen Firestore (field fotoDataUrl) — TIDAK memakai Firebase
+      //    Storage sama sekali, supaya tidak perlu upgrade ke paket Blaze.
+      //    Firestore membatasi ukuran dokumen ~1MB, jadi foto dikompres
+      //    (resize + turunkan kualitas JPEG) agar aman di bawah batas itu.
+      let fotoDataUrl;
       try{
-        // Pengaman timeout: kalau upload menggantung tanpa pernah
-        // resolve/reject (mis. karena masalah jaringan/CORS), jangan biarkan
-        // tombol macet selamanya — gagalkan otomatis setelah 25 detik supaya
-        // warga tahu harus coba lagi, bukan menunggu tanpa kepastian.
-        const uploadTimeout = new Promise((_, reject)=>{
-          setTimeout(()=> reject(new Error('upload-timeout')), 25000);
-        });
-        await Promise.race([
-          storageRef.put(selectedFotoFile, { contentType: selectedFotoFile.type }),
-          uploadTimeout
-        ]);
-        fotoUrl = await storageRef.getDownloadURL();
-      } catch(uploadErr){
-        console.error('Gagal upload foto:', uploadErr);
-        const pesan = uploadErr?.message === 'upload-timeout'
-          ? 'Unggah foto memakan waktu terlalu lama. Cek koneksi internet kamu dan coba lagi.'
-          : 'Gagal mengunggah foto. Cek koneksi internet kamu, atau coba pakai foto dengan ukuran lebih kecil.';
-        showToast(pesan, 'error');
+        fotoDataUrl = await compressFotoToDataUrl(selectedFotoFile, 1280, 0.72);
+        if(fotoDataUrl.length > 900000){
+          // Masih kebesaran (mis. foto sangat detail) — kompres ulang lebih agresif.
+          fotoDataUrl = await compressFotoToDataUrl(selectedFotoFile, 900, 0.5);
+        }
+      } catch(compErr){
+        console.error('Gagal memproses foto:', compErr);
+        showToast('Gagal memproses foto. Coba pakai foto lain atau format JPG/PNG biasa.', 'error');
         submitBtn.disabled = false;
         submitBtn.textContent = 'Kirim Laporan';
         return;
@@ -3318,8 +3345,8 @@ function wireReportForm(){
       const wantNotif = document.getElementById('repNotif').checked;
       const fcmToken = wantNotif ? await getNotifToken() : null;
 
-      // 2) Baru simpan dokumen laporan di Firestore, isi fotoUrl dengan
-      //    link Storage (bukan base64).
+      // 2) Baru simpan dokumen laporan di Firestore, isi fotoDataUrl dengan
+      //    base64 hasil kompresi (bukan link Storage).
       await reportsCol.add({
         ticketId,
         uid: currentUid,
@@ -3333,7 +3360,7 @@ function wireReportForm(){
           email: document.getElementById('repEmail').value.trim(),
           telp: document.getElementById('repTelp').value.trim(),
         },
-        fotoUrl,
+        fotoDataUrl,
         fcmToken: fcmToken || null,
         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
         confirmCount: 0,
