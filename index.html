@@ -2597,6 +2597,25 @@ document.getElementById('closeAboutModalBtn').addEventListener('click', ()=> abo
    itu, gunakan fitur "Cek Status" dengan nomor tiket yang sudah dicatat
    sendiri saat pertama melapor.
 ========================================================= */
+// Menyimpan & membaca daftar ID laporan yang pernah dikirim dari perangkat/
+// browser ini, terpisah dari uid sesi anonim Firebase — supaya "Laporan
+// Saya" tetap akurat walau uid anonim berubah (mis. setelah keluar dari
+// Mode Admin, yang memberi sesi anonim baru).
+function getMyReportIds(){
+  try{
+    return JSON.parse(localStorage.getItem('jagarute-my-report-ids') || '[]');
+  } catch(e){ return []; }
+}
+function rememberMyReportId(id){
+  try{
+    const ids = getMyReportIds();
+    if(!ids.includes(id)){
+      ids.push(id);
+      localStorage.setItem('jagarute-my-report-ids', JSON.stringify(ids));
+    }
+  } catch(e){ /* localStorage tidak tersedia — abaikan, bukan fatal */ }
+}
+
 const myReportsModal = document.getElementById('myReportsModal');
 document.getElementById('myReportsBtn').addEventListener('click', async ()=>{
   myReportsModal.hidden = false;
@@ -2612,7 +2631,8 @@ async function renderMyReports(){
     box.innerHTML = `<div class="empty-state"><div class="es-title">Gagal memuat</div><div>Coba muat ulang halaman.</div></div>`;
     return;
   }
-  const mine = reports.filter(r => r.uid === currentUid).sort((a,b)=> b.createdAt - a.createdAt);
+  const myIds = getMyReportIds();
+  const mine = reports.filter(r => r.uid === currentUid || myIds.includes(r.id)).sort((a,b)=> b.createdAt - a.createdAt);
   if(mine.length === 0){
     box.innerHTML = `
       <div class="empty-state">
@@ -3347,7 +3367,7 @@ function wireReportForm(){
 
       // 2) Baru simpan dokumen laporan di Firestore, isi fotoDataUrl dengan
       //    base64 hasil kompresi (bukan link Storage).
-      await reportsCol.add({
+      const newReportRef = await reportsCol.add({
         ticketId,
         uid: currentUid,
         namaJalan: document.getElementById('repJalan').value.trim(),
@@ -3366,6 +3386,11 @@ function wireReportForm(){
         confirmCount: 0,
         verified: false,
       });
+      // Catat ID laporan ini di localStorage — supaya "Laporan Saya" tetap
+      // bisa menemukannya nanti walau sesi anonim (uid) berubah di kemudian
+      // hari (mis. setelah sempat login/keluar Mode Admin di browser yang
+      // sama, yang membuat Firebase memberi UID anonim baru).
+      rememberMyReportId(newReportRef.id);
       exitPickMode();
       closePanel();
       showToast(`Laporan terkirim. ID Tiket Anda: ${ticketId}. Laporan akan tayang publik setelah diverifikasi admin.`);
