@@ -214,7 +214,7 @@ input,select{ font-family:inherit; }
 .recent-list{ display:grid; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); gap:.8rem; }
 .recent-card{
   background:var(--surface); border:2px solid var(--concrete-dark); border-radius:var(--radius-md);
-  padding:.85rem; cursor:pointer; text-align:left;
+  padding:.85rem; cursor:pointer; text-align:left; color:var(--ink);
 }
 .recent-card:hover{ border-color:var(--gov-blue); }
 .recent-card .rc2-head{ display:flex; justify-content:space-between; align-items:flex-start; gap:.5rem; }
@@ -1524,11 +1524,11 @@ input,select{ font-family:inherit; }
 <div id="toastContainer"></div>
 
 
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-storage-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging-compat.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script>
@@ -3287,11 +3287,24 @@ function wireReportForm(){
       const storageRef = storage.ref(`laporan-foto/${currentUid}/${Date.now()}_${safeName}`);
       let fotoUrl;
       try{
-        await storageRef.put(selectedFotoFile, { contentType: selectedFotoFile.type });
+        // Pengaman timeout: kalau upload menggantung tanpa pernah
+        // resolve/reject (mis. karena masalah jaringan/CORS), jangan biarkan
+        // tombol macet selamanya — gagalkan otomatis setelah 25 detik supaya
+        // warga tahu harus coba lagi, bukan menunggu tanpa kepastian.
+        const uploadTimeout = new Promise((_, reject)=>{
+          setTimeout(()=> reject(new Error('upload-timeout')), 25000);
+        });
+        await Promise.race([
+          storageRef.put(selectedFotoFile, { contentType: selectedFotoFile.type }),
+          uploadTimeout
+        ]);
         fotoUrl = await storageRef.getDownloadURL();
       } catch(uploadErr){
         console.error('Gagal upload foto:', uploadErr);
-        showToast('Gagal mengunggah foto. Cek koneksi internet kamu, atau coba pakai foto dengan ukuran lebih kecil.', 'error');
+        const pesan = uploadErr?.message === 'upload-timeout'
+          ? 'Unggah foto memakan waktu terlalu lama. Cek koneksi internet kamu dan coba lagi.'
+          : 'Gagal mengunggah foto. Cek koneksi internet kamu, atau coba pakai foto dengan ukuran lebih kecil.';
+        showToast(pesan, 'error');
         submitBtn.disabled = false;
         submitBtn.textContent = 'Kirim Laporan';
         return;
