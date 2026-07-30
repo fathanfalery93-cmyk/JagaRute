@@ -132,8 +132,17 @@ input,select{ font-family:inherit; }
 
 /* ---------- APP SHELL (halaman biasa, bukan full-viewport) ---------- */
 #mapBgCanvas{ position:fixed; inset:0; z-index:0; width:100vw; height:100vh; display:block; }
-#app{ min-height:100%; position:relative; z-index:1; }
+#app{ min-height:100%; height:100%; position:relative; z-index:1; display:flex; flex-direction:column; }
 .page{ max-width:1080px; margin:0 auto; padding:1.5rem 1.25rem 3rem; }
+/* Varian "peta penuh layar": dipakai khusus pada <main> pembungkus peta
+   warga, supaya peta mengisi seluruh sisa layar di bawah topbar (bukan
+   lagi dibatasi tinggi tetap seperti sebelumnya). Semua fitur lain
+   (ringkasan statistik, laporan terbaru, filter, dst) TETAP ADA — cuma
+   dipindah jadi panel mengambang di atas peta, tidak ada yang dihapus. */
+.page--mapfull{
+  max-width:none; margin:0; padding:0;
+  flex:1; min-height:0; position:relative; overflow:hidden;
+}
 .section-title{
   display:flex; align-items:center; gap:.5rem; font-family:var(--font-display);
   font-weight:700; font-size:1.3rem; letter-spacing:.01em; margin:2rem 0 .9rem;
@@ -210,6 +219,15 @@ input,select{ font-family:inherit; }
 #map{ position:absolute; inset:0; width:100%; height:100%; z-index:1; }
 #map.pick-mode{ cursor:crosshair; }
 
+/* Versi fullscreen: berlaku saat .map-card ada di dalam #publicMapSlot
+   pada <main class="page--mapfull"> (tampilan warga). Peta mengisi
+   seluruh sisa layar di bawah topbar, tanpa bingkai/kartu lagi. */
+.page--mapfull #publicMapSlot{ position:absolute; inset:0; }
+.page--mapfull .map-card{
+  position:absolute; inset:0; width:100%; height:100%;
+  border-radius:0; border:none; box-shadow:none;
+}
+
 /* ---------- RECENT REPORTS ---------- */
 .recent-list{ display:grid; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); gap:.8rem; }
 .recent-card{
@@ -257,7 +275,7 @@ input,select{ font-family:inherit; }
   width:100%; min-height:40px; border:none; background:var(--concrete);
   border-radius:var(--radius-sm); font-weight:600; color:var(--ink);
 }
-#filterOptions{ margin-top:.6rem; display:flex; flex-direction:column; gap:.7rem; }
+#filterOptions{ margin-top:.6rem; display:flex; flex-direction:column; gap:.7rem; max-height:250px; overflow-y:auto; }
 .filter-group-title{ font-size:.78rem; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-soft); font-weight:700; }
 .chip-row{ display:flex; flex-wrap:wrap; gap:.4rem; margin-top:.35rem; }
 .chip{
@@ -266,7 +284,7 @@ input,select{ font-family:inherit; }
   border:2px solid var(--concrete-dark); background:var(--surface);
   font-size:.85rem; font-weight:600; user-select:none;
 }
-.chip input{ accent-color: var(--gov-blue); }
+.chip input{ accent-color: var(--ink); }
 .chip .dot{ width:.7rem; height:.7rem; border-radius:50%; }
 
 /* ---------- STAT WIDGET ---------- */
@@ -276,7 +294,7 @@ input,select{ font-family:inherit; }
 }
 .stat-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:.5rem; }
 .stat-head h3{ margin:0; font-family:var(--font-display); font-size:1.3rem; font-weight:700; }
-#collapseStat{ min-width:32px; min-height:32px; border:none; background:var(--concrete); border-radius:6px; font-weight:800; }
+#collapseStat{ min-width:32px; min-height:32px; border:none; background:var(--concrete-dark); color:var(--ink); border-radius:6px; font-weight:800; }
 .stat-body{ display:flex; align-items:center; gap:.9rem; }
 .donut{ width:76px; height:76px; border-radius:50%; flex:none; position:relative; }
 .donut::after{
@@ -293,13 +311,56 @@ input,select{ font-family:inherit; }
 
 /* ---------- FAB ---------- */
 .fab{
-  position:absolute; z-index:900; right:1.2rem; bottom:1.2rem;
+  position:absolute; z-index:900; left:50%; bottom:1.2rem; transform:translateX(-50%);
   min-height:56px; padding:0 1.3rem; border-radius:999px;
   background:var(--signal-yellow); color:var(--asphalt); font-weight:700; font-size:1rem;
   border:3px solid var(--asphalt); box-shadow:var(--shadow-2);
   display:flex; align-items:center; gap:.5rem;
 }
-.fab:hover{ transform:translateY(-2px); }
+.fab:hover{ transform:translateX(-50%) translateY(-2px); }
+
+/* ---------- MAP OVERLAY (label judul + tombol panel saat peta fullscreen) ---------- */
+.map-title-chip{
+  position:absolute; z-index:800; top:.9rem; left:50%; transform:translateX(-50%);
+  display:flex; align-items:center; gap:.4rem; max-width:calc(100% - 1.8rem);
+  background:var(--surface); color:var(--ink); padding:.5rem .9rem; border-radius:999px;
+  font-family:var(--font-display); font-weight:700; font-size:.85rem; box-shadow:var(--shadow-1);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.map-overlay-rail{
+  position:absolute; z-index:850; bottom:1.2rem; left:1.2rem;
+  display:flex; gap:.6rem; flex-wrap:wrap;
+}
+.overlay-toggle-btn{
+  display:flex; align-items:center; gap:.4rem; min-height:48px; padding:0 1.1rem;
+  border-radius:999px; border:2px solid var(--asphalt); background:var(--surface); color:var(--ink);
+  font-weight:700; font-size:.85rem; box-shadow:var(--shadow-1);
+}
+.overlay-toggle-btn:hover{ background:var(--concrete-dark); }
+.overlay-toggle-btn[aria-expanded="true"]{ background:var(--signal-yellow); }
+
+/* Panel mengambang berisi konten yang sebelumnya tampil di bawah peta
+   (statistik ringkasan & laporan terbaru). Kontennya TIDAK dihapus atau
+   diubah — hanya dipindah ke sini supaya peta bisa penuh layar. Dibuka
+   / ditutup lewat tombol di .map-overlay-rail. */
+.overlay-sheet{
+  position:absolute; z-index:1100; left:0; right:0; max-height:64vh; overflow-y:auto;
+  background:var(--surface); color:var(--ink); box-shadow:var(--shadow-2);
+  padding:1.1rem 1.25rem 1.4rem; pointer-events:none; transition:transform .25s ease;
+}
+.overlay-sheet--top{ top:0; border-radius:0 0 var(--radius-lg) var(--radius-lg); transform:translateY(-105%); }
+.overlay-sheet--bottom{ bottom:0; border-radius:var(--radius-lg) var(--radius-lg) 0 0; transform:translateY(105%); }
+.overlay-sheet.open{ transform:translateY(0); pointer-events:auto; }
+.overlay-sheet-head{ display:flex; align-items:center; justify-content:space-between; gap:.6rem; margin-bottom:.8rem; }
+.overlay-sheet-close{ min-width:36px; min-height:36px; border:none; background:var(--concrete); color:var(--ink); border-radius:8px; font-weight:800; flex:none; }
+
+@media (max-width:720px){
+  .map-overlay-rail{ left:.8rem; bottom:.8rem; }
+  .overlay-toggle-btn .otb-text{ display:none; }
+  .overlay-toggle-btn{ padding:0; width:48px; justify-content:center; }
+  .overlay-sheet{ max-height:74vh; }
+  .map-title-chip{ font-size:.72rem; padding:.4rem .7rem; top:.6rem; }
+}
 
 /* ---------- SIDE PANEL ---------- */
 #sidePanel{
@@ -468,6 +529,18 @@ input,select{ font-family:inherit; }
 }
 #pickBanner button{ background:var(--signal-yellow); color:var(--asphalt); border:none; border-radius:999px; padding:.3rem .8rem; font-weight:700; min-height:32px; }
 
+/* ---------- GARIS NEON PENANDA RUAS JALAN RUSAK ---------- */
+/* Garis pendek di sepanjang arah ruas jalan pada titik laporan, dihitung
+   dari arah jalan ASLI (hasil query Overpass API saat laporan dibuat) —
+   bukan garis acak, lihat drawRoadHighlight() & fetchRoadBearing() di
+   skrip. Laporan yang belum/tidak punya data arah otomatis tidak
+   menampilkan garis ini, tanpa memengaruhi marker/tampilan lain. */
+.leaflet-overlay-pane path.road-highlight-neon{
+  filter: drop-shadow(0 0 3px #FF1E3C) drop-shadow(0 0 8px rgba(255,30,60,.85));
+  animation: roadNeonPulse 1.8s ease-in-out infinite;
+}
+@keyframes roadNeonPulse{ 0%,100%{ opacity:.78; } 50%{ opacity:1; } }
+
 /* ---------- CLUSTER BADGE ---------- */
 .cluster-badge{
   width:100%; height:100%; border-radius:50%;
@@ -530,21 +603,21 @@ input,select{ font-family:inherit; }
   #adminPanel.open{ transform:translateY(0); }
   .fab span.fab-text{ display:none; }
   .fab{ padding:0; width:60px; height:60px; justify-content:center; }
-  .ai-panel{ width:calc(100vw - 1.6rem); right:.8rem; }
+  .ai-panel{ width:calc(100vw - 5.8rem); right:4rem; }
 }
 @media (prefers-reduced-motion: reduce){
   *{ animation:none !important; transition:none !important; }
 }
 /* ---------- ASK AI ---------- */
 .ai-fab{
-  position:fixed; right:1.2rem; bottom:1.2rem; z-index:1250;
+  position:fixed; right:4.4rem; bottom:1.2rem; z-index:1250;
   min-height:52px; padding:0 1.2rem; border-radius:999px;
   background:var(--chrome-surface); color:var(--chrome-text); border:none; font-weight:700; font-size:.92rem;
   display:flex; align-items:center; gap:.5rem; box-shadow:var(--shadow-2);
 }
 .ai-fab:hover{ background:var(--chrome-surface-2); }
 .ai-panel{
-  position:fixed; right:1.2rem; bottom:5.2rem; z-index:1250;
+  position:fixed; right:4.4rem; bottom:5.2rem; z-index:1250;
   width:340px; max-width:calc(100vw - 2rem); height:460px; max-height:70vh;
   background:var(--surface); border-radius:var(--radius-lg); box-shadow:var(--shadow-2);
   display:flex; flex-direction:column; overflow:hidden; transform-origin:bottom right;
@@ -792,8 +865,15 @@ input,select{ font-family:inherit; }
 .ad-map-wrap .map-card{ height:420px; border-color:var(--ad-border); }
 .ad-map-wrap #adDashboardMapSlot{ flex:1; display:flex; }
 .ad-map-wrap #adDashboardMapSlot .map-card{ flex:1; height:auto; min-height:420px; }
-.ad-map-wrap.full .map-card{ height:min(74vh, 640px); }
-.map-card--full{ height:min(74vh, 640px) !important; }
+
+/* Tab "Peta Kerusakan" dibuat penuh (mengisi seluruh sisa tinggi area
+   konten admin secara dinamis), setara dengan perlakuan peta di sisi
+   warga. Sidebar, topbar, dan judul panel admin TETAP ADA seperti semula
+   — cuma ukuran peta di tab ini yang berubah jadi maksimal. */
+#adTabPeta.active{ display:flex; flex-direction:column; height:100%; }
+#adTabPeta .ad-map-wrap.full{ flex:1; display:flex; flex-direction:column; min-height:0; }
+#adTabPeta .ad-map-wrap.full #adPetaMapSlot{ flex:1; display:flex; min-height:0; }
+.map-card--full{ height:auto !important; flex:1 1 auto; min-height:0; }
 .ad-map-wrap .fab-link{
   display:flex; align-items:center; gap:.4rem; border:1px solid var(--ad-border); background:var(--ad-panel-2);
   color:var(--ad-text); border-radius:var(--radius-sm); padding:.4rem .8rem; font-size:.78rem; font-weight:700;
@@ -865,7 +945,13 @@ input,select{ font-family:inherit; }
 
 /* ---------- SIDEBAR RINGKASAN CEPAT (mode warga, kiri) ---------- */
 .warga-sidebar{
-  position:fixed; left:0; top:50%; transform:translateY(-50%); z-index:950;
+  /* Dulu dipusatkan pakai top:66% + translateY(-50%) — masih kepotong
+     dropdown Filter yang meluas panjang ke bawah. Sekarang posisinya
+     dihitung dari BAWAH layar (bukan dari tengah), supaya jarak amannya
+     stabil terhadap dropdown filter yang tingginya sudah pasti (bukan
+     ikut skala tinggi viewport), sekaligus tetap di atas tombol overlay
+     "Ringkasan Laporan/Laporan Terbaru" di pojok kiri-bawah peta. */
+  position:fixed; left:0; top:auto; bottom:5.5rem; transform:none; z-index:950;
   display:flex; align-items:flex-start;
 }
 .ws-rail{
@@ -880,10 +966,10 @@ input,select{ font-family:inherit; }
 .ws-rail:hover .ws-rail-icon, .ws-rail[aria-expanded="true"] .ws-rail-icon{ color:var(--asphalt); background:var(--signal-yellow); }
 
 .ws-panel{
-  width:0; overflow:hidden; background:var(--surface); border-radius:0 var(--radius-lg) var(--radius-lg) 0;
+  width:0; height:0; overflow:hidden; background:var(--surface); border-radius:0 var(--radius-lg) var(--radius-lg) 0;
   box-shadow:var(--shadow-2); transition:width .28s ease; max-height:min(70vh, 560px); display:flex; flex-direction:column;
 }
-.ws-panel.open{ width:min(300px, calc(100vw - 5rem)); border:2px solid var(--concrete-dark); border-left:none; }
+.ws-panel.open{ width:min(300px, calc(100vw - 5rem)); height:auto; border:2px solid var(--concrete-dark); border-left:none; }
 
 .ws-view{ display:none; flex-direction:column; padding:.9rem; overflow-y:auto; }
 .ws-view.active{ display:flex; }
@@ -1208,21 +1294,13 @@ input,select{ font-family:inherit; }
     </div>
   </header>
 
-  <main class="page">
+  <main class="page page--mapfull">
 
-    <div class="stats-row" id="statsRow">
-      <!-- Skeleton loading — otomatis diganti isi asli begitu data dari Firestore selesai dimuat -->
-      <div class="stat-card"><div class="sc-top"><div class="skel-block" style="width:2.6rem;height:2.6rem;border-radius:12px;"></div><div style="flex:1;"><div class="skel-block" style="width:70%;height:10px;margin-bottom:8px;"></div><div class="skel-block" style="width:40%;height:22px;"></div></div></div><div class="skel-block" style="width:50%;height:10px;margin-top:.7rem;"></div></div>
-      <div class="stat-card"><div class="sc-top"><div class="skel-block" style="width:2.6rem;height:2.6rem;border-radius:12px;"></div><div style="flex:1;"><div class="skel-block" style="width:70%;height:10px;margin-bottom:8px;"></div><div class="skel-block" style="width:40%;height:22px;"></div></div></div><div class="skel-block" style="width:50%;height:10px;margin-top:.7rem;"></div></div>
-      <div class="stat-card"><div class="sc-top"><div class="skel-block" style="width:2.6rem;height:2.6rem;border-radius:12px;"></div><div style="flex:1;"><div class="skel-block" style="width:70%;height:10px;margin-bottom:8px;"></div><div class="skel-block" style="width:40%;height:22px;"></div></div></div><div class="skel-block" style="width:50%;height:10px;margin-top:.7rem;"></div></div>
-      <div class="stat-card"><div class="sc-top"><div class="skel-block" style="width:2.6rem;height:2.6rem;border-radius:12px;"></div><div style="flex:1;"><div class="skel-block" style="width:70%;height:10px;margin-bottom:8px;"></div><div class="skel-block" style="width:40%;height:22px;"></div></div></div><div class="skel-block" style="width:50%;height:10px;margin-top:.7rem;"></div></div>
-      <div class="stat-card"><div class="sc-top"><div class="skel-block" style="width:2.6rem;height:2.6rem;border-radius:12px;"></div><div style="flex:1;"><div class="skel-block" style="width:70%;height:10px;margin-bottom:8px;"></div><div class="skel-block" style="width:40%;height:22px;"></div></div></div><div class="skel-block" style="width:50%;height:10px;margin-top:.7rem;"></div></div>
-    </div>
-
-    <h2 class="section-title"><span data-icon="map" data-icon-size="22"></span> Peta Sebaran Kerusakan Jalan</h2>
     <div id="publicMapSlot">
     <div class="map-card">
       <div id="map" role="application" aria-label="Peta lokasi kerusakan jalan"></div>
+
+      <div class="map-title-chip"><span data-icon="map" data-icon-size="16"></span>&nbsp;Peta Sebaran Kerusakan Jalan</div>
 
       <div id="pickBanner">
         <span>Klik pada peta untuk memilih lokasi</span>
@@ -1262,11 +1340,44 @@ input,select{ font-family:inherit; }
     </div>
     </div>
 
-    <h2 class="section-title"><span data-icon="clock" data-icon-size="22"></span> Laporan Terbaru</h2>
-    <div class="recent-list" id="recentList">
-      <div class="recent-card" style="cursor:default;"><div class="skel-block" style="width:65%;height:14px;margin-bottom:8px;"></div><div class="skel-block" style="width:45%;height:10px;"></div></div>
-      <div class="recent-card" style="cursor:default;"><div class="skel-block" style="width:65%;height:14px;margin-bottom:8px;"></div><div class="skel-block" style="width:45%;height:10px;"></div></div>
-      <div class="recent-card" style="cursor:default;"><div class="skel-block" style="width:65%;height:14px;margin-bottom:8px;"></div><div class="skel-block" style="width:45%;height:10px;"></div></div>
+    <!-- Tombol pembuka panel mengambang: berisi fitur yang sebelumnya
+         tampil di bawah peta (ringkasan statistik & laporan terbaru).
+         Tidak ada yang dihapus, hanya dipindah ke sini supaya peta bisa
+         penuh layar. -->
+    <div class="map-overlay-rail">
+      <button type="button" id="statsPanelToggle" class="overlay-toggle-btn" aria-expanded="false" aria-controls="statsOverlayPanel">
+        <span data-icon="trendingUp"></span><span class="otb-text">&nbsp;Ringkasan Laporan</span>
+      </button>
+      <button type="button" id="recentPanelToggle" class="overlay-toggle-btn" aria-expanded="false" aria-controls="recentOverlayPanel">
+        <span data-icon="clock"></span><span class="otb-text">&nbsp;Laporan Terbaru</span>
+      </button>
+    </div>
+
+    <div id="statsOverlayPanel" class="overlay-sheet overlay-sheet--top">
+      <div class="overlay-sheet-head">
+        <h2 class="section-title" style="margin:0;"><span data-icon="trendingUp" data-icon-size="22"></span> Ringkasan Laporan</h2>
+        <button type="button" id="statsOverlayClose" class="overlay-sheet-close" aria-label="Tutup ringkasan">✕</button>
+      </div>
+      <div class="stats-row" id="statsRow">
+        <!-- Skeleton loading — otomatis diganti isi asli begitu data dari Firestore selesai dimuat -->
+        <div class="stat-card"><div class="sc-top"><div class="skel-block" style="width:2.6rem;height:2.6rem;border-radius:12px;"></div><div style="flex:1;"><div class="skel-block" style="width:70%;height:10px;margin-bottom:8px;"></div><div class="skel-block" style="width:40%;height:22px;"></div></div></div><div class="skel-block" style="width:50%;height:10px;margin-top:.7rem;"></div></div>
+        <div class="stat-card"><div class="sc-top"><div class="skel-block" style="width:2.6rem;height:2.6rem;border-radius:12px;"></div><div style="flex:1;"><div class="skel-block" style="width:70%;height:10px;margin-bottom:8px;"></div><div class="skel-block" style="width:40%;height:22px;"></div></div></div><div class="skel-block" style="width:50%;height:10px;margin-top:.7rem;"></div></div>
+        <div class="stat-card"><div class="sc-top"><div class="skel-block" style="width:2.6rem;height:2.6rem;border-radius:12px;"></div><div style="flex:1;"><div class="skel-block" style="width:70%;height:10px;margin-bottom:8px;"></div><div class="skel-block" style="width:40%;height:22px;"></div></div></div><div class="skel-block" style="width:50%;height:10px;margin-top:.7rem;"></div></div>
+        <div class="stat-card"><div class="sc-top"><div class="skel-block" style="width:2.6rem;height:2.6rem;border-radius:12px;"></div><div style="flex:1;"><div class="skel-block" style="width:70%;height:10px;margin-bottom:8px;"></div><div class="skel-block" style="width:40%;height:22px;"></div></div></div><div class="skel-block" style="width:50%;height:10px;margin-top:.7rem;"></div></div>
+        <div class="stat-card"><div class="sc-top"><div class="skel-block" style="width:2.6rem;height:2.6rem;border-radius:12px;"></div><div style="flex:1;"><div class="skel-block" style="width:70%;height:10px;margin-bottom:8px;"></div><div class="skel-block" style="width:40%;height:22px;"></div></div></div><div class="skel-block" style="width:50%;height:10px;margin-top:.7rem;"></div></div>
+      </div>
+    </div>
+
+    <div id="recentOverlayPanel" class="overlay-sheet overlay-sheet--bottom">
+      <div class="overlay-sheet-head">
+        <h2 class="section-title" style="margin:0;"><span data-icon="clock" data-icon-size="22"></span> Laporan Terbaru</h2>
+        <button type="button" id="recentOverlayClose" class="overlay-sheet-close" aria-label="Tutup laporan terbaru">✕</button>
+      </div>
+      <div class="recent-list" id="recentList">
+        <div class="recent-card" style="cursor:default;"><div class="skel-block" style="width:65%;height:14px;margin-bottom:8px;"></div><div class="skel-block" style="width:45%;height:10px;"></div></div>
+        <div class="recent-card" style="cursor:default;"><div class="skel-block" style="width:65%;height:14px;margin-bottom:8px;"></div><div class="skel-block" style="width:45%;height:10px;"></div></div>
+        <div class="recent-card" style="cursor:default;"><div class="skel-block" style="width:65%;height:14px;margin-bottom:8px;"></div><div class="skel-block" style="width:45%;height:10px;"></div></div>
+      </div>
     </div>
 
   </main>
@@ -1490,8 +1601,6 @@ input,select{ font-family:inherit; }
         <li>Unggah foto buktinya dan isi data singkat (jenis kerusakan, tingkat keparahan, data diri pelapor).</li>
         <li>Kirim — kamu akan dapat nomor tiket untuk melacak status laporanmu.</li>
       </ol>
-      <p>Setiap laporan diperiksa dulu oleh admin sebelum tayang ke publik, lalu statusnya berjalan: Belum Ditangani → Dalam Tinjauan → Dalam Proses → Selesai.</p>
-      <p><strong>Privasi data kamu:</strong> Nama, email, dan nomor HP yang kamu isi saat melapor hanya digunakan oleh admin untuk keperluan verifikasi &amp; tindak lanjut laporan — tidak ditampilkan ke publik lain dan tidak dipakai untuk keperluan promosi/pemasaran.</p>
     </div>
     <button id="closeAboutModalBtn" class="btn-submit" style="border-radius:var(--radius-sm);">Mengerti</button>
   </div>
@@ -1726,6 +1835,12 @@ function docToReport(doc){
     resolvedAt: d.resolvedAt ? toDate(d.resolvedAt) : null,
     tanggal: formatTanggal(createdAt),
     confirmCount: d.confirmCount || 0,
+    // Arah ruas jalan (derajat, 0-360) hasil pencarian ke Overpass API saat
+    // laporan dibuat — dipakai untuk menggambar garis neon di sepanjang
+    // jalan pada marker (lihat drawRoadHighlight()). Laporan LAMA yang
+    // belum punya field ini (dibuat sebelum fitur ini ada) cukup tidak
+    // menampilkan garis neon, tanpa memengaruhi tampilan lain sama sekali.
+    roadBearing: typeof d.roadBearing === 'number' ? d.roadBearing : null,
     // Laporan baru (setelah fitur moderasi ini ada) mulai dari
     // verified=false sampai admin mengecek & menayangkannya ke publik.
     // Dokumen LAMA yang belum punya field ini dianggap sudah verified,
@@ -2121,8 +2236,12 @@ document.querySelectorAll('[data-icon]').forEach(el=>{
 const map = L.map('map', { zoomControl:false }).setView([-6.9175,107.6191], 13);
 L.control.zoom({ position:'bottomright' }).addTo(map);
 
-const streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  maxZoom:19, attribution:'© OpenStreetMap'
+/* Basemap "Jalan" memakai CARTO Dark Matter — tile raster bertema gelap
+   (bukan OpenStreetMap standar lagi) supaya kesan peta lebih profesional/
+   elegan, sambil tetap 100% kompatibel dengan Leaflet + markercluster yang
+   sudah dipakai di seluruh aplikasi (tidak perlu migrasi ke MapLibre). */
+const streetLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  maxZoom:19, subdomains:'abcd', attribution:'© OpenStreetMap contributors © CARTO'
 }).addTo(map);
 const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
   maxZoom:19, attribution:'Tiles © Esri'
@@ -2148,6 +2267,12 @@ const markersLayer = L.markerClusterGroup({
   }
 }).addTo(map);
 let tempPickMarker = null;
+
+// Layer terpisah (bukan bagian dari markercluster) khusus untuk garis
+// neon penanda ruas jalan rusak — supaya bisa dibersihkan/digambar ulang
+// sendiri tiap kali daftar laporan berubah, tanpa mengganggu logic
+// clustering marker yang sudah ada.
+const roadHighlightLayer = L.layerGroup().addTo(map);
 
 function buildIcon(status, level){
   const meta = STATUS_META[status];
@@ -2218,6 +2343,7 @@ function focusOnReport(r){
 
 function renderMarkers(list){
   markersLayer.clearLayers();
+  roadHighlightLayer.clearLayers();
   markerIndex.clear();
   list.forEach(r=>{
     const m = L.marker([r.lat, r.lng], { icon: buildIcon(r.status, r.level) });
@@ -2225,7 +2351,81 @@ function renderMarkers(list){
     m.on('click', ()=> focusOnReport(r));
     m.addTo(markersLayer);
     markerIndex.set(r.id, m);
+    drawRoadHighlight(r);
   });
+}
+
+// Panjang garis neon (meter) yang digambar di sepanjang arah ruas jalan,
+// dipusatkan pada titik laporan. Cukup pendek — ini penanda visual titik
+// kerusakan, bukan usaha menggambar seluruh ruas jalan.
+const ROAD_HIGHLIGHT_LENGTH_M = 26;
+
+// Menggambar garis neon HANYA untuk laporan yang sudah punya roadBearing
+// tersimpan (lihat fetchRoadBearing & docToReport). Kalau belum ada
+// (mis. laporan lama sebelum fitur ini dibuat, atau Overpass API sempat
+// gagal saat laporan dibuat), laporan tetap tampil normal tanpa garis —
+// tidak ada error, tidak ada garis "asal-asalan".
+function drawRoadHighlight(r){
+  if(typeof r.roadBearing !== 'number') return;
+  const half = ROAD_HIGHLIGHT_LENGTH_M / 2;
+  const a = destinationPoint(r.lat, r.lng, r.roadBearing, half);
+  const b = destinationPoint(r.lat, r.lng, r.roadBearing + 180, half);
+  L.polyline([a, b], {
+    className: 'road-highlight-neon',
+    color: '#FF1E3C', weight: 6, opacity: .92, lineCap: 'round'
+  }).addTo(roadHighlightLayer);
+}
+
+// Titik tujuan dari sebuah koordinat, mengikuti arah (bearing, derajat)
+// sejauh distM meter — formula destination point standar (great-circle).
+function destinationPoint(lat, lng, bearingDeg, distM){
+  const R = 6371000;
+  const brng = bearingDeg * Math.PI / 180;
+  const lat1 = lat * Math.PI / 180, lng1 = lng * Math.PI / 180;
+  const lat2 = Math.asin(Math.sin(lat1) * Math.cos(distM / R) + Math.cos(lat1) * Math.sin(distM / R) * Math.cos(brng));
+  const lng2 = lng1 + Math.atan2(
+    Math.sin(brng) * Math.sin(distM / R) * Math.cos(lat1),
+    Math.cos(distM / R) - Math.sin(lat1) * Math.sin(lat2)
+  );
+  return [lat2 * 180 / Math.PI, lng2 * 180 / Math.PI];
+}
+
+// Arah (bearing, 0-360 derajat) dari titik 1 ke titik 2.
+function bearingBetween(lat1, lng1, lat2, lng2){
+  const toRad = d => d * Math.PI / 180;
+  const y = Math.sin(toRad(lng2 - lng1)) * Math.cos(toRad(lat2));
+  const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) - Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(toRad(lng2 - lng1));
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+// Cari ruas jalan (way `highway=*`) terdekat dari titik laporan lewat
+// Overpass API (data OpenStreetMap), lalu hitung arah ruas itu dari 2
+// titik geometrinya yang berdekatan dengan titik klik. Dipakai HANYA
+// untuk menggambar garis neon — kalau gagal/timeout/tidak ada jalan
+// ditemukan, fungsi ini melempar/mengembalikan null, dan pemanggilnya
+// (lihat wireReportForm) sudah membungkusnya supaya TIDAK PERNAH
+// mengganggu proses simpan laporan itu sendiri.
+async function fetchRoadBearing(lat, lng){
+  const radius = 25; // meter
+  const query = `[out:json][timeout:8];way(around:${radius},${lat},${lng})[highway];out geom;`;
+  const res = await fetch('https://overpass-api.de/api/interpreter', {
+    method: 'POST',
+    body: 'data=' + encodeURIComponent(query)
+  });
+  if(!res.ok) throw new Error('overpass-gagal');
+  const data = await res.json();
+  const way = (data.elements || []).find(el => el.type === 'way' && Array.isArray(el.geometry) && el.geometry.length >= 2);
+  if(!way) return null;
+
+  let bestIdx = 0, bestDist = Infinity;
+  way.geometry.forEach((pt, i)=>{
+    const d = distanceMeters(lat, lng, pt.lat, pt.lon);
+    if(d < bestDist){ bestDist = d; bestIdx = i; }
+  });
+  const p1 = way.geometry[Math.max(0, bestIdx - 1)];
+  const p2 = way.geometry[Math.min(way.geometry.length - 1, bestIdx + 1)];
+  if(p1.lat === p2.lat && p1.lon === p2.lon) return null;
+  return bearingBetween(p1.lat, p1.lon, p2.lat, p2.lon);
 }
 
 function escapeHtml(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
@@ -3391,6 +3591,16 @@ function wireReportForm(){
       // hari (mis. setelah sempat login/keluar Mode Admin di browser yang
       // sama, yang membuat Firebase memberi UID anonim baru).
       rememberMyReportId(newReportRef.id);
+      // Ambil arah ruas jalan (utk garis neon) di LATAR BELAKANG — sengaja
+      // TIDAK di-await, supaya warga tidak perlu menunggu Overpass API
+      // sebelum melihat konfirmasi laporan terkirim. Kalau gagal/timeout,
+      // laporan tetap tersimpan normal seperti biasa, cuma garis neonnya
+      // tidak muncul untuk laporan ini.
+      fetchRoadBearing(tempLat, tempLng)
+        .then(bearing=>{
+          if(typeof bearing === 'number') return reportsCol.doc(newReportRef.id).update({ roadBearing: bearing });
+        })
+        .catch(e=> console.error('Gagal mengambil arah jalan (tidak fatal, garis neon cuma tidak muncul):', e));
       exitPickMode();
       closePanel();
       showToast(`Laporan terkirim. ID Tiket Anda: ${ticketId}. Laporan akan tayang publik setelah diverifikasi admin.`);
@@ -3816,6 +4026,39 @@ async function sendAiMessage(presetText){
     wsUpdateCounts();
   };
 })();
+
+/* =========================================================
+   PANEL MENGAMBANG DI ATAS PETA (mode warga)
+   Berisi "Ringkasan Laporan" & "Laporan Terbaru" yang sebelumnya
+   ditampilkan di bawah peta. Sekarang jadi panel mengambang yang bisa
+   dibuka/tutup lewat tombol di pojok kiri-bawah peta — kontennya sendiri
+   TIDAK diubah, cuma penempatannya, supaya peta bisa penuh layar.
+========================================================= */
+(function initMapOverlayPanels(){
+  const statsBtn = document.getElementById('statsPanelToggle');
+  const recentBtn = document.getElementById('recentPanelToggle');
+  const statsPanel = document.getElementById('statsOverlayPanel');
+  const recentPanel = document.getElementById('recentOverlayPanel');
+  const statsClose = document.getElementById('statsOverlayClose');
+  const recentClose = document.getElementById('recentOverlayClose');
+  if(!statsBtn || !recentBtn || !statsPanel || !recentPanel) return;
+
+  function setOpen(panel, btn, open){
+    panel.classList.toggle('open', open);
+    btn.setAttribute('aria-expanded', String(open));
+  }
+  statsBtn.addEventListener('click', ()=> setOpen(statsPanel, statsBtn, !statsPanel.classList.contains('open')));
+  recentBtn.addEventListener('click', ()=> setOpen(recentPanel, recentBtn, !recentPanel.classList.contains('open')));
+  statsClose.addEventListener('click', ()=> setOpen(statsPanel, statsBtn, false));
+  recentClose.addEventListener('click', ()=> setOpen(recentPanel, recentBtn, false));
+})();
+
+/* Peta sekarang mengisi ukuran layar yang dinamis (fullscreen), jadi
+   perlu diberi tahu ulang ukurannya tiap kali jendela browser di-resize —
+   tanpa ini, Leaflet bisa salah hitung ukuran tile saat viewport berubah. */
+window.addEventListener('resize', ()=>{
+  try{ map.invalidateSize(); } catch(e){}
+});
 
 startRealtimeSync();
 </script>
