@@ -1006,6 +1006,9 @@ input,select{ font-family:inherit; }
 @media (max-width:720px){
   .ws-panel.open{ width:min(260px, calc(100vw - 4.4rem)); }
 }
+.tile-osm-dark {
+  filter: invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.9);
+}
 </style>
 </head>
 <body>
@@ -2240,8 +2243,8 @@ L.control.zoom({ position:'bottomright' }).addTo(map);
    (bukan OpenStreetMap standar lagi) supaya kesan peta lebih profesional/
    elegan, sambil tetap 100% kompatibel dengan Leaflet + markercluster yang
    sudah dipakai di seluruh aplikasi (tidak perlu migrasi ke MapLibre). */
-const streetLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-  maxZoom:19, subdomains:'abcd', attribution:'© OpenStreetMap contributors © CARTO'
+const streetLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom:19, className:'tile-osm-dark', attribution:'© OpenStreetMap contributors'
 }).addTo(map);
 const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
   maxZoom:19, attribution:'Tiles © Esri'
